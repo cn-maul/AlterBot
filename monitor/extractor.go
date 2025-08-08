@@ -3,8 +3,8 @@ package monitor
 import (
 	"strings"
 
-	"AlterBot/config"
 	"github.com/PuerkitoBio/goquery"
+	"github.com/cn-maul/AlterBot/config"
 )
 
 // ExtractResult 表示从网页中提取的单个结果项

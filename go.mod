@@ -1,4 +1,4 @@
-module AlterBot
+module github.com/cn-maul/AlterBot
 
 go 1.25rc2
 

@@ -1,11 +1,11 @@
 package monitor
 
 import (
-	"AlterBot/config"
-	"AlterBot/fetcher"
-	"AlterBot/notify"
 	"encoding/json/v2"
 	"fmt"
+	"github.com/cn-maul/AlterBot/config"
+	"github.com/cn-maul/AlterBot/fetcher"
+	"github.com/cn-maul/AlterBot/notify"
 	"log"
 	"os"
 	"strings"
