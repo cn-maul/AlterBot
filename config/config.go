@@ -32,12 +32,18 @@ type SiteConfig struct {
 }
 
 type Config struct {
+	Web WebConfig `json:"web"`
+
 	Notification *struct {
 		Service string                 `json:"service"`
 		Config  map[string]interface{} `json:"config"`
 	} `json:"notification,omitempty"` // 改为可选配置
 
 	Sites []SiteConfig `json:"sites"`
+}
+
+type WebConfig struct {
+	Port string `json:"port"` // 如 ":8080"
 }
 
 // LoadConfig 加载并校验配置

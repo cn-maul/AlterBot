@@ -33,7 +33,7 @@ func (p *pushPlusNotifier) Send(title, content string) error {
 	payload := map[string]interface{}{
 		"token":   p.token,
 		"title":   title,
-		"content": content,
+		"content": content + "\n",
 	}
 	if p.channel != "" {
 		payload["channel"] = p.channel
