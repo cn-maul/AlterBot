@@ -1,0 +1,12 @@
+# AlterBot
+examples
+.idea
+*.db
+config.json
+config.private.json
+frontend/node_modules/
+frontend/dist/
+alterbot
+alterbot.exe
+*.db-wal
+*.db-shm
