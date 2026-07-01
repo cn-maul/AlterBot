@@ -138,31 +138,3 @@ func Exists(name string) bool {
 	_, ok := monitors[name]
 	return ok
 }
-
-/*
-// 获取单个监控器状态
-status := GetMonitor("example-site").GetStatus()
-
-// 获取所有监控器状态
-allStatus := GetAllMonitors()
-
-// 输出状态信息示例
-fmt.Printf(`
-Name: %s
-URL: %s
-Running: %v
-Last Check: %v (took %v)
-Next Check: %v
-Updates: %d
-Last Error: %s
-`,
-	status.Name,
-	status.URL,
-	status.IsRunning,
-	status.LastCheck.Format(time.RFC3339),
-	status.LastDuration,
-	status.NextCheck.Format(time.RFC3339),
-	status.UpdatesCount,
-	status.LastError,
-)
-*/
