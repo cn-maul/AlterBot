@@ -18,6 +18,7 @@ type Monitor struct {
 	extractor  *Extractor
 	fetcher    *fetcher.Fetcher
 	stopCh     chan struct{}
+	stopOnce   sync.Once
 	status     MonitorStatus
 	statusLock sync.RWMutex
 }
@@ -196,6 +197,13 @@ func toString(v interface{}) string {
 		return s
 	}
 	return fmt.Sprintf("%v", v)
+}
+
+// Stop 安全停止监控器（可多次调用，不会 panic）
+func (m *Monitor) Stop() {
+	m.stopOnce.Do(func() {
+		close(m.stopCh)
+	})
 }
 
 func (m *Monitor) loadLastResults() ([]ExtractResult, error) {

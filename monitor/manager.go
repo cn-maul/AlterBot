@@ -111,7 +111,7 @@ func StartAllFromDB() {
 func StopAll() {
 	monitorsLock.RLock()
 	for name, m := range monitors {
-		close(m.stopCh)
+		m.Stop()
 		log.Printf("[%s] 监控器已停止", name)
 	}
 	monitorsLock.RUnlock()
@@ -126,7 +126,7 @@ func StopMonitor(name string) bool {
 	if !exists {
 		return false
 	}
-	close(m.stopCh)
+	m.Stop()
 	log.Printf("[%s] 监控器已停止", name)
 	return true
 }

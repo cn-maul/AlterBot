@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/cn-maul/AlterBot/database"
 	"github.com/cn-maul/AlterBot/monitor"
@@ -100,6 +101,8 @@ func (s *WebServer) removeMonitor(c *gin.Context) {
 	if monitor.Exists(name) {
 		monitor.StopMonitor(name)
 	}
+	// 从注册表移除
+	monitor.UnregisterMonitor(name)
 
 	// 从数据库删除
 	result := database.GetDB().Where("name = ?", name).Delete(&database.Site{})
@@ -160,7 +163,7 @@ func (s *WebServer) stopMonitor(c *gin.Context) {
 }
 
 func (s *WebServer) updateMonitor(c *gin.Context) {
-	name := c.Param("name")
+	oldName := c.Param("name")
 
 	var req addMonitorRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -170,14 +173,21 @@ func (s *WebServer) updateMonitor(c *gin.Context) {
 
 	// 从数据库查找
 	var site database.Site
-	if err := database.GetDB().Where("name = ?", name).First(&site).Error; err != nil {
+	if err := database.GetDB().Where("name = ?", oldName).First(&site).Error; err != nil {
 		c.JSON(http.StatusNotFound, NewErrorResponse(404, "monitor not found"))
 		return
 	}
 
-	// 停止旧实例
-	if monitor.Exists(name) {
-		monitor.StopMonitor(name)
+	// 停止正在运行的旧实例（不注销，稍后复用或替换）
+	oldMonitor := monitor.GetMonitor(oldName)
+	if oldMonitor != nil && oldMonitor.GetStatus().IsRunning {
+		oldMonitor.Stop()
+	}
+
+	// 如果改名，把旧名从注册表移除（新名由 startMonitorGoroutine 注册）
+	nameChanged := req.Name != "" && req.Name != oldName
+	if nameChanged {
+		monitor.UnregisterMonitor(oldName)
 	}
 
 	// 更新数据库
@@ -185,20 +195,16 @@ func (s *WebServer) updateMonitor(c *gin.Context) {
 	if group == "" {
 		group = "默认"
 	}
-	database.GetDB().Model(&site).Updates(map[string]interface{}{
-		"Name":          req.Name,
-		"URL":           req.URL,
-		"Container":     req.Container,
-		"Item":          req.Item,
-		"GroupName":     group,
-		"CheckInterval": req.CheckInterval,
-		"IsActive":      req.IsActive,
-	})
+	site.Name = req.Name
+	site.URL = req.URL
+	site.Container = req.Container
+	site.Item = req.Item
+	site.GroupName = group
+	site.CheckInterval = req.CheckInterval
+	site.IsActive = req.IsActive
+	database.GetDB().Save(&site)
 
 	// 重设字段
-	if req.Name != name {
-		database.GetDB().Model(&site).Update("name", req.Name)
-	}
 	database.GetDB().Where("site_id = ?", site.ID).Delete(&database.SiteField{})
 	for _, f := range req.Fields {
 		ft := f.Type
@@ -215,14 +221,18 @@ func (s *WebServer) updateMonitor(c *gin.Context) {
 		})
 	}
 
-	// 如果要求启动则启动
+	// 如果要求启动，重新读取完整配置并启动
 	if req.IsActive {
 		var updatedSite database.Site
 		database.GetDB().Preload("Fields").First(&updatedSite, site.ID)
 		startMonitorGoroutine(&updatedSite)
 	}
 
-	log.Printf("[Web] 更新监控器: %s -> %s", name, req.Name)
+	newName := req.Name
+	if newName == "" {
+		newName = oldName
+	}
+	log.Printf("[Web] 更新监控器: %s -> %s", oldName, newName)
 	c.JSON(http.StatusOK, NewSuccessResponse(nil))
 }
 
@@ -268,6 +278,29 @@ func (s *WebServer) getMonitorConfig(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, NewSuccessResponse(site))
+}
+
+func (s *WebServer) markAllNotified(c *gin.Context) {
+	name := c.Param("name")
+
+	var site database.Site
+	if err := database.GetDB().Where("name = ?", name).First(&site).Error; err != nil {
+		c.JSON(http.StatusNotFound, NewErrorResponse(404, "monitor not found"))
+		return
+	}
+
+	now := time.Now()
+	result := database.GetDB().Model(&database.UpdateRecord{}).
+		Where("site_id = ? AND notified = ?", site.ID, false).
+		Updates(map[string]interface{}{
+			"notified":     true,
+			"notified_at": now,
+		})
+
+	log.Printf("[Web] 标记 %s 的 %d 条记录为已推送", name, result.RowsAffected)
+	c.JSON(http.StatusOK, NewSuccessResponse(map[string]interface{}{
+		"updated": result.RowsAffected,
+	}))
 }
 
 func (s *WebServer) listGroups(c *gin.Context) {
@@ -357,4 +390,82 @@ func (s *WebServer) updateNotificationSettings(c *gin.Context) {
 
 	log.Printf("[通知] 推送设置已更新: enabled=%v service=%s", req.Enabled, req.Service)
 	c.JSON(http.StatusOK, NewSuccessResponse(nil))
+}
+
+// ===== 智能扫描 =====
+
+func (s *WebServer) previewScan(c *gin.Context) {
+	var req struct {
+		URL      string `json:"url" binding:"required"`
+		Keywords string `json:"keywords" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, NewErrorResponse(400, "参数错误: "+err.Error()))
+		return
+	}
+
+	// 解析关键词
+	var keywords []string
+	for _, kw := range splitKeywords(req.Keywords) {
+		if kw != "" {
+			keywords = append(keywords, kw)
+		}
+	}
+	if len(keywords) == 0 {
+		c.JSON(http.StatusBadRequest, NewErrorResponse(400, "至少需要一个关键词"))
+		return
+	}
+
+	result, err := monitor.SmartScan(&monitor.ScanSettings{
+		URL:      req.URL,
+		Keywords: keywords,
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, NewErrorResponse(500, "扫描失败: "+err.Error()))
+		return
+	}
+
+	c.JSON(http.StatusOK, NewSuccessResponse(result))
+}
+
+func (s *WebServer) smartCreate(c *gin.Context) {
+	var req struct {
+		Name         string `json:"name" binding:"required"`
+		URL          string `json:"url" binding:"required"`
+		ContainerCSS string `json:"container_css" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, NewErrorResponse(400, "参数错误: "+err.Error()))
+		return
+	}
+
+	_, err := monitor.MonitorFromScan(req.Name, req.URL, req.ContainerCSS)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, NewErrorResponse(500, "创建失败: "+err.Error()))
+		return
+	}
+
+	c.JSON(http.StatusCreated, NewSuccessResponse(map[string]interface{}{
+		"name": req.Name,
+	}))
+}
+
+// splitKeywords 分割关键词（支持中英文逗号、空格）
+func splitKeywords(s string) []string {
+	var result []string
+	current := ""
+	for _, r := range s {
+		if r == ',' || r == '，' || r == '　' || r == ' ' {
+			if current != "" {
+				result = append(result, current)
+				current = ""
+			}
+		} else {
+			current += string(r)
+		}
+	}
+	if current != "" {
+		result = append(result, current)
+	}
+	return result
 }

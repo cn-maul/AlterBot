@@ -11,7 +11,6 @@ import (
 )
 
 func (s *WebServer) setupRoutes() {
-	// 添加CORS配置
 	s.engine.Use(cors.New(cors.Config{
 		AllowOrigins:     []string{"http://localhost:5173"},
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
@@ -21,17 +20,11 @@ func (s *WebServer) setupRoutes() {
 		MaxAge:           12 * time.Hour,
 	}))
 
-	// 健康检查
 	s.engine.GET("/api/health", s.healthCheck)
-
-	// 分组列表
 	s.engine.GET("/api/groups", s.listGroups)
-
-	// 通知设置
 	s.engine.GET("/api/settings/notifications", s.getNotificationSettings)
 	s.engine.PUT("/api/settings/notifications", s.updateNotificationSettings)
 
-	// 监控器管理 API
 	api := s.engine.Group("/api/v1/monitors")
 	{
 		api.GET("/", s.listMonitors)
@@ -43,16 +36,18 @@ func (s *WebServer) setupRoutes() {
 		api.POST("/:name/stop", s.stopMonitor)
 		api.GET("/:name/updates", s.getUpdates)
 		api.GET("/:name/config", s.getMonitorConfig)
+		api.PUT("/:name/mark-all-notified", s.markAllNotified)
 	}
 
-	// 嵌入的前端静态文件（生产模式自动启用）
+	// 智能扫描（在 api 组之外，避免 :name 通配符冲突）
+	s.engine.POST("/api/v1/monitors/preview", s.previewScan)
+	s.engine.POST("/api/v1/monitors/smart-create", s.smartCreate)
+
 	if s.frontendFS != nil {
-		// 提取 assets 子目录作为文件服务器
 		assets, err := fs.Sub(s.frontendFS, "assets")
 		if err == nil {
 			s.engine.StaticFS("/assets", http.FS(assets))
 		}
-		// SPA 回退：所有未匹配的路由返回 index.html
 		s.engine.NoRoute(func(c *gin.Context) {
 			indexHTML, err := fs.ReadFile(s.frontendFS, "index.html")
 			if err != nil {
@@ -79,19 +74,10 @@ func (s *WebServer) getMonitor(c *gin.Context) {
 	c.JSON(http.StatusOK, NewSuccessResponse(m.GetStatus()))
 }
 
-// NewSuccessResponse 创建成功响应
 func NewSuccessResponse(data interface{}) APIResponse {
-	return APIResponse{
-		Code:    0,
-		Message: "success",
-		Data:    data,
-	}
+	return APIResponse{Code: 0, Message: "success", Data: data}
 }
 
-// NewErrorResponse 创建错误响应
 func NewErrorResponse(code int, message string) APIResponse {
-	return APIResponse{
-		Code:    code,
-		Message: message,
-	}
+	return APIResponse{Code: code, Message: message}
 }

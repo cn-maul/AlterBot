@@ -60,6 +60,21 @@ export function fetchMonitorConfig(name) {
   return client.get(`/monitors/${encodeURIComponent(name)}/config`).then(r => r.data)
 }
 
+// 一键标注所有未推送为已推送
+export function markAllNotified(name) {
+  return client.put(`/monitors/${encodeURIComponent(name)}/mark-all-notified`).then(r => r.data)
+}
+
+// 智能扫描：预览网页内容
+export function previewScan(params) {
+  return client.post('/monitors/preview', params).then(r => r.data)
+}
+
+// 智能创建：确认并创建监控器
+export function smartCreate(params) {
+  return client.post('/monitors/smart-create', params).then(r => r.data)
+}
+
 // 健康检查
 export function healthCheck() {
   return rootClient.get('/health').then(r => r.data)

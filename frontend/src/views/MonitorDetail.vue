@@ -2,18 +2,13 @@
   <div class="monitor-detail">
     <div class="page-header">
       <div>
-        <router-link to="/" class="back-link">← 返回</router-link>
+        <router-link to="/" class="back-btn pill-link">← 返回</router-link>
         <h1>{{ monitor ? monitor.name : '加载中...' }}</h1>
       </div>
       <div class="header-actions" v-if="monitor">
         <button class="circle-btn" :class="monitor.is_running ? 'btn-pause' : 'btn-play'" @click="toggleRun" :disabled="actionLoading" :title="monitor.is_running ? '暂停' : '启动'">
-          <svg v-if="monitor.is_running" viewBox="0 0 24 24" fill="currentColor" width="18" height="18">
-            <rect x="6" y="4" width="4" height="16" rx="1"/>
-            <rect x="14" y="4" width="4" height="16" rx="1"/>
-          </svg>
-          <svg v-else viewBox="0 0 24 24" fill="currentColor" width="18" height="18">
-            <path d="M8 5v14l11-7z"/>
-          </svg>
+          <svg v-if="monitor.is_running" viewBox="0 0 24 24" fill="currentColor" width="18" height="18"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg>
+          <svg v-else viewBox="0 0 24 24" fill="currentColor" width="18" height="18"><path d="M8 5v14l11-7z"/></svg>
         </button>
         <router-link :to="`/edit/${encodeURIComponent(monitor.name)}`" class="btn btn-ghost btn-sm">编辑</router-link>
         <button class="btn btn-danger btn-sm" @click="confirmDelete">删除</button>
@@ -94,6 +89,10 @@
       <div class="settings-section">
         <div class="section-header">
           <h2>更新历史</h2>
+          <button class="btn btn-sm btn-ghost" :disabled="markLoading" @click="handleMarkAll" v-if="records.length > 0">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+            全部标为已推送
+          </button>
         </div>
         <UpdateTable :records="records" :loading="updatesLoading" />
       </div>
@@ -104,7 +103,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { fetchMonitor, fetchUpdates, startMonitor, stopMonitor, deleteMonitor } from '../api/monitors'
+import { fetchMonitor, fetchUpdates, startMonitor, stopMonitor, deleteMonitor, markAllNotified } from '../api/monitors'
 import StatusBadge from '../components/StatusBadge.vue'
 import UpdateTable from '../components/UpdateTable.vue'
 
@@ -117,56 +116,35 @@ const loading = ref(true)
 const updatesLoading = ref(false)
 const error = ref(null)
 const actionLoading = ref(false)
+const markLoading = ref(false)
 const successMsg = ref('')
 const pageErrorMsg = ref('')
 const showDeleteConfirm = ref(false)
 
 let msgTimer = null
 
-function showSuccess(msg) {
-  successMsg.value = msg
-  clearTimeout(msgTimer)
-  msgTimer = setTimeout(() => { successMsg.value = '' }, 3000)
-}
-
-function showError(msg) {
-  pageErrorMsg.value = msg
-  clearTimeout(msgTimer)
-  msgTimer = setTimeout(() => { pageErrorMsg.value = '' }, 5000)
-}
+function showSuccess(msg) { successMsg.value = msg; clearTimeout(msgTimer); msgTimer = setTimeout(() => { successMsg.value = '' }, 3000) }
+function showError(msg) { pageErrorMsg.value = msg; clearTimeout(msgTimer); msgTimer = setTimeout(() => { pageErrorMsg.value = '' }, 5000) }
 
 onMounted(loadData)
 
 async function loadData() {
-  loading.value = true
-  error.value = null
+  loading.value = true; error.value = null
   try {
     const res = await fetchMonitor(route.params.name)
-    if (res.code === 0) {
-      monitor.value = res.data
-      loadUpdates()
-    } else {
-      error.value = res.message || '监控器不存在'
-    }
-  } catch (e) {
-    error.value = e.response?.data?.message || e.message
-  } finally {
-    loading.value = false
-  }
+    if (res.code === 0) { monitor.value = res.data; loadUpdates() }
+    else { error.value = res.message || '监控器不存在' }
+  } catch (e) { error.value = e.response?.data?.message || e.message }
+  finally { loading.value = false }
 }
 
 async function loadUpdates() {
   updatesLoading.value = true
   try {
     const res = await fetchUpdates(route.params.name)
-    if (res.code === 0 && res.data) {
-      records.value = res.data.records || []
-    }
-  } catch {
-    // ignore
-  } finally {
-    updatesLoading.value = false
-  }
+    if (res.code === 0 && res.data) { records.value = res.data.records || [] }
+  } catch { /* ignore */ }
+  finally { updatesLoading.value = false }
 }
 
 async function toggleRun() {
@@ -175,25 +153,18 @@ async function toggleRun() {
     if (monitor.value.is_running) {
       await stopMonitor(route.params.name)
       pageErrorMsg.value = '监控器已暂停'
-      clearTimeout(msgTimer)
-      msgTimer = setTimeout(() => { pageErrorMsg.value = '' }, 3000)
+      clearTimeout(msgTimer); msgTimer = setTimeout(() => { pageErrorMsg.value = '' }, 3000)
     } else {
       await startMonitor(route.params.name)
       successMsg.value = '监控器已启动'
-      clearTimeout(msgTimer)
-      msgTimer = setTimeout(() => { successMsg.value = '' }, 3000)
+      clearTimeout(msgTimer); msgTimer = setTimeout(() => { successMsg.value = '' }, 3000)
     }
     await loadData()
-  } catch (e) {
-    showError('操作失败: ' + (e.response?.data?.message || e.message))
-  } finally {
-    actionLoading.value = false
-  }
+  } catch (e) { showError('操作失败: ' + (e.response?.data?.message || e.message)) }
+  finally { actionLoading.value = false }
 }
 
-function confirmDelete() {
-  showDeleteConfirm.value = true
-}
+function confirmDelete() { showDeleteConfirm.value = true }
 
 async function handleDelete() {
   actionLoading.value = true
@@ -202,102 +173,62 @@ async function handleDelete() {
     router.push('/')
   } catch (e) {
     showError('删除失败: ' + (e.response?.data?.message || e.message))
-    showDeleteConfirm.value = false
-    actionLoading.value = false
+    showDeleteConfirm.value = false; actionLoading.value = false
   }
 }
 
-function formatTime(t) {
-  if (!t) return '—'
-  return new Date(t).toLocaleString('zh-CN')
+async function handleMarkAll() {
+  markLoading.value = true
+  try {
+    const res = await markAllNotified(route.params.name)
+    const n = res.data?.updated || 0
+    showSuccess(`已将 ${n} 条记录标为已推送`)
+    await loadUpdates()
+  } catch (e) { showError('操作失败: ' + (e.message)) }
+  finally { markLoading.value = false }
 }
 
-function formatInterval(ns) {
-  if (!ns) return '—'
-  const s = Math.floor(ns / 1e9)
-  if (s >= 3600) return `${Math.round(s / 3600)} 小时`
-  if (s >= 60) return `${Math.round(s / 60)} 分钟`
-  return `${s} 秒`
-}
-
-function formatDuration(ns) {
-  if (!ns) return '—'
-  const ms = Math.round(ns / 1e6)
-  if (ms >= 1000) return `${(ms / 1000).toFixed(1)}s`
-  return `${ms}ms`
-}
+function formatTime(t) { if (!t) return '—'; return new Date(t).toLocaleString('zh-CN') }
+function formatInterval(ns) { if (!ns) return '—'; const s = Math.floor(ns / 1e9); if (s >= 3600) return `${Math.round(s / 3600)} 小时`; if (s >= 60) return `${Math.round(s / 60)} 分钟`; return `${s} 秒` }
+function formatDuration(ns) { if (!ns) return '—'; const ms = Math.round(ns / 1e6); if (ms >= 1000) return `${(ms / 1000).toFixed(1)}s`; return `${ms}ms` }
 </script>
 
 <style scoped>
-.status-row {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  margin-bottom: 1rem;
-}
-
-.interval-badge {
-  font-size: 0.75rem;
-  color: var(--text-muted);
-  background: var(--bg-elevated);
-  padding: 0.15rem 0.5rem;
-  border-radius: var(--radius-pill);
-}
-
-.status-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.75rem;
-}
-
-.status-item {
-  display: flex;
-  flex-direction: column;
-  gap: 0.1rem;
-}
-
-.status-label {
-  font-size: 0.6875rem;
-  font-weight: 700;
-  color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.8px;
-}
-
-.status-value {
-  font-size: 0.875rem;
-  color: var(--text);
-  word-break: break-all;
-}
-
+.status-row { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1rem; }
+.interval-badge { font-size: 0.75rem; color: var(--text-muted); background: var(--bg-elevated); padding: 0.15rem 0.5rem; border-radius: var(--radius-pill); }
+.status-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
+.status-item { display: flex; flex-direction: column; gap: 0.1rem; }
+.status-label { font-size: 0.6875rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.8px; }
+.status-value { font-size: 0.875rem; color: var(--text); word-break: break-all; }
 .error-text { color: var(--error); }
 
-/* Circular play/pause button */
-.circle-btn {
-  width: 44px;
-  height: 44px;
-  border: none;
-  border-radius: var(--radius-circle);
-  cursor: pointer;
+/* 统一返回按钮 */
+.back-btn {
+  display: inline-flex; align-items: center; gap: 0.3rem;
+  padding: 0.35rem 0.85rem; border-radius: var(--radius-pill);
+  font-size: 0.8125rem; font-weight: 700; color: var(--text-secondary);
+  background: var(--bg-elevated); text-decoration: none;
   transition: var(--transition);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
 }
+.back-btn:hover { background: var(--bg-hover); color: var(--text); }
 
+/* Page header */
+.page-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 1.5rem; }
+.page-header h1 { font-size: 1.5rem; font-weight: 700; color: var(--text); margin-top: 0.5rem; }
+
+/* Circular button */
+.circle-btn {
+  width: 44px; height: 44px; border: none; border-radius: var(--radius-circle);
+  cursor: pointer; transition: var(--transition);
+  display: flex; align-items: center; justify-content: center; padding: 0;
+}
 .circle-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-
 .btn-play { background: var(--green); color: #000000; }
 .btn-play:hover:not(:disabled) { background: var(--green-hover); transform: scale(1.08); }
 .btn-pause { background: var(--bg-elevated); color: var(--text); }
 .btn-pause:hover:not(:disabled) { background: #333; transform: scale(1.08); }
 
-.header-actions {
-  display: flex;
-  gap: 0.5rem;
-  align-items: center;
-}
+.header-actions { display: flex; gap: 0.5rem; align-items: center; }
 
 @media (max-width: 768px) {
   .status-grid { grid-template-columns: 1fr; }

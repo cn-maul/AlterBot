@@ -10,4 +10,4 @@ alterbot
 alterbot.exe
 .claude/
 *.db-wal
-*.db-shm
+*.db-shm*.xlsx
