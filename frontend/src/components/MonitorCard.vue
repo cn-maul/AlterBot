@@ -1,45 +1,40 @@
 <template>
-  <div class="monitor-row" :class="{ 'row-error': isError, 'row-stopped': !isRunning }">
-    <div class="row-left">
+  <div class="monitor-card" :class="{ 'card-error': isError, 'card-stopped': !isRunning }" @click="$emit('view')">
+    <div class="card-left">
       <StatusBadge :status="statusText" />
-      <span class="row-name">{{ monitor.name }}</span>
+      <span class="card-name">{{ monitor.name }}</span>
     </div>
 
-    <div class="row-center">
-      <span class="row-url" :title="monitor.url">{{ monitor.url }}</span>
+    <div class="card-url-wrap">
+      <span class="card-url" :title="monitor.url">{{ monitor.url }}</span>
     </div>
 
-    <div class="row-meta">
-      <span class="meta-item" v-if="monitor.last_check">
+    <div class="card-meta">
+      <span class="meta-time" v-if="monitor.last_check">
         {{ formatTime(monitor.last_check) }}
       </span>
-      <span class="meta-item" v-if="monitor.updates_count > 0" style="color: var(--primary);">
-        {{ monitor.updates_count }} 条更新
+      <span class="meta-updates" v-if="monitor.updates_count > 0">
+        {{ monitor.updates_count }}
       </span>
-      <span class="meta-item meta-error" v-if="monitor.last_error" :title="monitor.last_error">
+      <span class="meta-error-badge" v-if="monitor.last_error" :title="monitor.last_error">
         错误
       </span>
     </div>
 
-    <div class="row-actions">
-      <button class="btn btn-action" :class="isRunning ? 'btn-pause' : 'btn-play'" @click="$emit(isRunning ? 'stop' : 'start')" :title="isRunning ? '暂停' : '启动'">
-        <!-- 暂停图标（两条竖杠） -->
-        <svg v-if="isRunning" viewBox="0 0 24 24" fill="currentColor" width="18" height="18">
+    <div class="card-actions" @click.stop>
+      <button class="circle-btn" :class="isRunning ? 'btn-pause' : 'btn-play'" @click="$emit(isRunning ? 'stop' : 'start')" :title="isRunning ? '暂停' : '启动'">
+        <svg v-if="isRunning" viewBox="0 0 24 24" fill="currentColor" width="16" height="16">
           <rect x="6" y="4" width="4" height="16" rx="1"/>
           <rect x="14" y="4" width="4" height="16" rx="1"/>
         </svg>
-        <!-- 播放图标（三角形） -->
-        <svg v-else viewBox="0 0 24 24" fill="currentColor" width="18" height="18">
+        <svg v-else viewBox="0 0 24 24" fill="currentColor" width="16" height="16">
           <path d="M8 5v14l11-7z"/>
         </svg>
       </button>
-      <button class="btn-icon btn-icon-edit" title="编辑" @click="$emit('edit')">
+      <button class="icon-btn" title="编辑" @click="$emit('edit')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
       </button>
-      <button class="btn-icon btn-icon-view" title="详情" @click="$emit('view')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-      </button>
-      <button class="btn-icon btn-icon-danger" title="删除" @click="$emit('delete')">
+      <button class="icon-btn icon-btn-danger" title="删除" @click="$emit('delete')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
       </button>
     </div>
@@ -74,55 +69,58 @@ function formatTime(t) {
 </script>
 
 <style scoped>
-.monitor-row {
+.monitor-card {
   display: flex;
   align-items: center;
   gap: 1rem;
   padding: 0.75rem 1rem;
   background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-lg);
+  cursor: pointer;
   transition: var(--transition);
+  user-select: none;
 }
 
-.monitor-row:hover {
-  border-color: var(--primary-light);
-  box-shadow: var(--shadow-sm);
+.monitor-card:hover {
+  background: var(--bg-hover);
 }
 
-.row-error {
-  border-color: var(--error);
-  border-left: 3px solid var(--error);
+.card-error {
+  background: rgba(243, 114, 127, 0.06);
 }
 
-.row-stopped {
-  opacity: 0.65;
+.card-error:hover {
+  background: rgba(243, 114, 127, 0.1);
 }
 
-.row-left {
+.card-stopped {
+  opacity: 0.55;
+}
+
+.card-left {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  min-width: 150px;
+  gap: 0.65rem;
+  min-width: 140px;
   flex-shrink: 0;
 }
 
-.row-name {
-  font-weight: 600;
-  font-size: 0.9rem;
+.card-name {
+  font-weight: 700;
+  font-size: 0.875rem;
   color: var(--text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.row-center {
+.card-url-wrap {
   flex: 1;
   min-width: 0;
 }
 
-.row-url {
-  font-size: 0.8rem;
+.card-url {
+  font-size: 0.75rem;
   color: var(--text-muted);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -130,109 +128,107 @@ function formatTime(t) {
   display: block;
 }
 
-.row-meta {
-  display: flex;
-  gap: 0.75rem;
-  flex-shrink: 0;
-}
-
-.meta-item {
-  font-size: 0.78rem;
-  color: var(--text-secondary);
-  white-space: nowrap;
-}
-
-.meta-error {
-  color: var(--error);
-}
-
-.row-actions {
+.card-meta {
   display: flex;
   align-items: center;
   gap: 0.5rem;
   flex-shrink: 0;
 }
 
-/* 启动/暂停大按钮 */
-.btn-action {
-  display: inline-flex;
+.meta-time {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.meta-updates {
+  font-size: 0.6875rem;
+  font-weight: 700;
+  color: var(--text);
+  background: var(--bg-elevated);
+  padding: 0.15rem 0.5rem;
+  border-radius: var(--radius-pill);
+  white-space: nowrap;
+}
+
+.meta-error-badge {
+  font-size: 0.6875rem;
+  font-weight: 700;
+  color: var(--error);
+  background: var(--error-bg);
+  padding: 0.15rem 0.5rem;
+  border-radius: var(--radius-pill);
+  white-space: nowrap;
+}
+
+.card-actions {
+  display: flex;
   align-items: center;
-  justify-content: center;
-  width: 38px;
-  height: 38px;
+  gap: 0.25rem;
+  flex-shrink: 0;
+}
+
+/* Circular play/pause button */
+.circle-btn {
+  width: 36px;
+  height: 36px;
   border: none;
-  border-radius: var(--radius);
+  border-radius: var(--radius-circle);
   cursor: pointer;
   transition: var(--transition);
+  display: flex;
+  align-items: center;
+  justify-content: center;
   padding: 0;
 }
 
 .btn-play {
-  background: var(--success);
-  color: white;
+  background: var(--green);
+  color: #000000;
 }
 
 .btn-play:hover {
-  background: #059669;
+  background: var(--green-hover);
+  transform: scale(1.08);
 }
 
 .btn-pause {
-  background: var(--warning);
-  color: white;
+  background: var(--bg-elevated);
+  color: var(--text);
 }
 
 .btn-pause:hover {
-  background: #d97706;
+  background: #333333;
+  transform: scale(1.08);
 }
 
-/*图标按钮增大*/
-.btn-icon {
+/* Icon buttons */
+.icon-btn {
   background: none;
   border: none;
   cursor: pointer;
-  padding: 0.5rem;
-  border-radius: var(--radius-sm);
+  padding: 0.4rem;
+  border-radius: var(--radius-circle);
   transition: var(--transition);
   color: var(--text-muted);
   display: inline-flex;
   align-items: center;
+  justify-content: center;
+  opacity: 0;
 }
 
-.btn-icon svg {
-  width: 18px;
-  height: 18px;
+.monitor-card:hover .icon-btn {
+  opacity: 1;
 }
 
-.btn-icon:hover {
-  background: var(--bg-hover);
-  color: var(--primary);
-}
-
-.btn-icon-edit:hover {
-  color: var(--primary);
-}
-
-.btn-icon-view:hover {
-  color: var(--primary);
-}
-
-.btn-icon-danger:hover {
-  background: var(--error-bg);
-  color: var(--error);
-}
+.icon-btn svg { width: 18px; height: 18px; }
+.icon-btn:hover { background: var(--bg-active); color: var(--text); }
+.icon-btn-danger:hover { color: var(--error); }
 
 @media (max-width: 768px) {
-  .monitor-row {
-    flex-wrap: wrap;
-    gap: 0.5rem;
-  }
-  .row-left {
-    min-width: 0;
-    flex: 1;
-  }
-  .row-meta {
-    order: 10;
-    width: 100%;
-  }
+  .monitor-card { flex-wrap: wrap; gap: 0.5rem; }
+  .card-left { min-width: 0; flex: 1; }
+  .icon-btn { opacity: 1; }
+  .card-meta { order: 10; width: 100%; }
 }
 </style>

@@ -7,7 +7,6 @@
       </div>
     </div>
 
-    <!-- 加载态（编辑模式） -->
     <div class="loading" v-if="isEdit && loading">
       <div class="spinner" />
       <p>加载配置...</p>
@@ -63,7 +62,6 @@
         </label>
       </div>
 
-      <!-- 错误提示 -->
       <div class="form-error" v-if="submitError">{{ submitError }}</div>
 
       <div class="form-actions">
@@ -146,13 +144,9 @@ function validate() {
 
 async function handleSubmit() {
   const err = validate()
-  if (err) {
-    submitError.value = err
-    return
-  }
+  if (err) { submitError.value = err; return }
   submitError.value = null
   submitting.value = true
-
   try {
     const payload = {
       name: form.value.name.trim(),
@@ -164,7 +158,6 @@ async function handleSubmit() {
       is_active: form.value.is_active,
       fields: form.value.fields.filter(f => f.name.trim() && f.selector.trim()),
     }
-
     if (isEdit.value) {
       await updateMonitor(route.params.name, payload)
     } else {
@@ -181,7 +174,7 @@ async function handleSubmit() {
 
 <style scoped>
 .page-header {
-  margin-bottom: 1.5rem;
+  margin-bottom: 2rem;
 }
 
 .page-header h1 {
@@ -191,43 +184,8 @@ async function handleSubmit() {
   margin-top: 0.5rem;
 }
 
-.back-link {
+.page-desc {
   color: var(--text-secondary);
-  font-size: 0.9rem;
-  text-decoration: none;
-}
-
-.back-link:hover {
-  color: var(--primary);
-}
-
-.form-error {
-  background: var(--error-bg);
-  color: var(--error);
-  padding: 0.5rem 0.75rem;
-  border-radius: var(--radius);
-  font-size: 0.85rem;
-  margin-bottom: 1rem;
-}
-
-.form-actions {
-  display: flex;
-  gap: 0.5rem;
-  justify-content: flex-end;
-  margin-top: 1rem;
-}
-
-.checkbox-label {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-size: 0.9rem;
-  color: var(--text);
-  cursor: pointer;
-}
-
-.checkbox-label input {
-  width: 16px;
-  height: 16px;
+  font-size: 0.8125rem;
 }
 </style>

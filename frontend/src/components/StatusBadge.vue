@@ -34,39 +34,35 @@ const label = computed(() => {
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
-  padding: 0.2rem 0.6rem;
-  border-radius: 20px;
-  font-size: 0.78rem;
-  font-weight: 500;
+  padding: 0.15rem 0.55rem;
+  border-radius: var(--radius-pill);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  text-transform: capitalize;
+  letter-spacing: 0.3px;
 }
 
 .badge-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-circle);
 }
 
 .badge-success {
-  background: var(--success-bg, #ecfdf5);
-  color: var(--success, #10b981);
+  background: var(--success-bg);
+  color: var(--success);
 }
-.badge-success .badge-dot {
-  background: var(--success, #10b981);
-}
+.badge-success .badge-dot { background: var(--success); }
 
 .badge-error {
-  background: var(--error-bg, #fef2f2);
-  color: var(--error, #ef4444);
+  background: var(--error-bg);
+  color: var(--error);
 }
-.badge-error .badge-dot {
-  background: var(--error, #ef4444);
-}
+.badge-error .badge-dot { background: var(--error); }
 
 .badge-default {
-  background: var(--bg-hover, #f1f5f9);
-  color: var(--text-muted, #94a3b8);
+  background: var(--bg-elevated);
+  color: var(--text-muted);
 }
-.badge-default .badge-dot {
-  background: var(--text-muted, #94a3b8);
-}
+.badge-default .badge-dot { background: var(--text-muted); }
 </style>

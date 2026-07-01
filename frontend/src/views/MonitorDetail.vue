@@ -6,7 +6,7 @@
         <h1>{{ monitor ? monitor.name : '加载中...' }}</h1>
       </div>
       <div class="header-actions" v-if="monitor">
-        <button class="btn btn-action" :class="monitor.is_running ? 'btn-pause' : 'btn-play'" @click="toggleRun" :disabled="actionLoading">
+        <button class="circle-btn" :class="monitor.is_running ? 'btn-pause' : 'btn-play'" @click="toggleRun" :disabled="actionLoading" :title="monitor.is_running ? '暂停' : '启动'">
           <svg v-if="monitor.is_running" viewBox="0 0 24 24" fill="currentColor" width="18" height="18">
             <rect x="6" y="4" width="4" height="16" rx="1"/>
             <rect x="14" y="4" width="4" height="16" rx="1"/>
@@ -14,46 +14,37 @@
           <svg v-else viewBox="0 0 24 24" fill="currentColor" width="18" height="18">
             <path d="M8 5v14l11-7z"/>
           </svg>
-          {{ actionLoading ? '处理中...' : (monitor.is_running ? '暂停' : '启动') }}
         </button>
-        <router-link :to="`/edit/${encodeURIComponent(monitor.name)}`" class="btn btn-ghost">
-          ✏️ 编辑
-        </router-link>
-        <button class="btn btn-danger" @click="confirmDelete">
-          🗑 删除
-        </button>
+        <router-link :to="`/edit/${encodeURIComponent(monitor.name)}`" class="btn btn-ghost btn-sm">编辑</router-link>
+        <button class="btn btn-danger btn-sm" @click="confirmDelete">删除</button>
       </div>
     </div>
 
-    <!-- 内联通知 -->
     <div class="toast toast-success" v-if="successMsg">{{ successMsg }}</div>
     <div class="toast toast-warning" v-if="pageErrorMsg">{{ pageErrorMsg }}</div>
 
-    <!-- 加载态 -->
     <div class="loading" v-if="loading">
       <div class="spinner" />
       <p>加载监控器详情...</p>
     </div>
 
-    <!-- 错误态 -->
     <div class="empty" v-else-if="error">
       <div class="empty-icon">❌</div>
       <p>{{ error }}</p>
       <button class="btn btn-primary btn-sm" style="margin-top: 1rem;" @click="loadData">重试</button>
     </div>
 
-    <!-- 删除确认对话框 -->
     <div class="modal-overlay" v-if="showDeleteConfirm" @click.self="showDeleteConfirm = false">
       <div class="modal-container">
         <div class="modal-header">
           <h2>确认删除</h2>
           <button class="modal-close" @click="showDeleteConfirm = false">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
           </button>
         </div>
         <div class="modal-body">
           <p>确定要删除监控器「{{ monitor?.name }}」吗？</p>
-          <p style="color: var(--text-muted); font-size: 0.85rem; margin-top: 0.5rem;">删除后无法恢复，相关更新记录也会被清除。</p>
+          <p style="margin-top: 0.5rem;">删除后无法恢复，相关更新记录也会被清除。</p>
         </div>
         <div class="modal-footer">
           <button class="btn btn-ghost" @click="showDeleteConfirm = false">取消</button>
@@ -63,11 +54,10 @@
     </div>
 
     <template v-else-if="monitor">
-      <!-- 状态面板 -->
       <div class="status-panel settings-section">
         <div class="status-row">
           <StatusBadge :status="monitor.is_running ? 'running' : (monitor.last_error ? 'error' : 'stopped')" />
-          <span class="interval-badge">间隔 {{ formatInterval(monitor.check_interval) }}</span>
+          <span class="interval-badge">{{ formatInterval(monitor.check_interval) }}</span>
         </div>
         <div class="status-grid">
           <div class="status-item">
@@ -101,7 +91,6 @@
         </div>
       </div>
 
-      <!-- 更新历史 -->
       <div class="settings-section">
         <div class="section-header">
           <h2>更新历史</h2>
@@ -240,61 +229,6 @@ function formatDuration(ns) {
 </script>
 
 <style scoped>
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: 1.5rem;
-}
-
-.page-header h1 {
-  font-size: 1.5rem;
-  font-weight: 700;
-  color: var(--text);
-  margin-top: 0.5rem;
-}
-
-.back-link {
-  color: var(--text-secondary);
-  font-size: 0.9rem;
-  text-decoration: none;
-}
-
-.back-link:hover {
-  color: var(--primary);
-}
-
-.toast {
-  padding: 0.6rem 1rem;
-  border-radius: var(--radius);
-  font-size: 0.85rem;
-  margin-bottom: 1rem;
-  animation: fadeIn 0.2s ease;
-}
-
-.toast-success {
-  background: var(--success-bg);
-  color: var(--success);
-  border: 1px solid var(--success);
-}
-
-.toast-warning {
-  background: var(--warning-bg);
-  color: var(--warning);
-  border: 1px solid var(--warning);
-}
-
-.toast-error {
-  background: var(--error-bg);
-  color: var(--error);
-  border: 1px solid var(--error);
-}
-
-@keyframes fadeIn {
-  from { opacity: 0; transform: translateY(-4px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
 .status-row {
   display: flex;
   align-items: center;
@@ -303,8 +237,11 @@ function formatDuration(ns) {
 }
 
 .interval-badge {
-  font-size: 0.8rem;
+  font-size: 0.75rem;
   color: var(--text-muted);
+  background: var(--bg-elevated);
+  padding: 0.15rem 0.5rem;
+  border-radius: var(--radius-pill);
 }
 
 .status-grid {
@@ -316,82 +253,54 @@ function formatDuration(ns) {
 .status-item {
   display: flex;
   flex-direction: column;
-  gap: 0.15rem;
+  gap: 0.1rem;
 }
 
 .status-label {
-  font-size: 0.78rem;
+  font-size: 0.6875rem;
+  font-weight: 700;
   color: var(--text-muted);
   text-transform: uppercase;
-  letter-spacing: 0.03em;
+  letter-spacing: 0.8px;
 }
 
 .status-value {
-  font-size: 0.9rem;
+  font-size: 0.875rem;
   color: var(--text);
   word-break: break-all;
 }
 
-.error-text {
-  color: var(--error);
+.error-text { color: var(--error); }
+
+/* Circular play/pause button */
+.circle-btn {
+  width: 44px;
+  height: 44px;
+  border: none;
+  border-radius: var(--radius-circle);
+  cursor: pointer;
+  transition: var(--transition);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
 }
+
+.circle-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.btn-play { background: var(--green); color: #000000; }
+.btn-play:hover:not(:disabled) { background: var(--green-hover); transform: scale(1.08); }
+.btn-pause { background: var(--bg-elevated); color: var(--text); }
+.btn-pause:hover:not(:disabled) { background: #333; transform: scale(1.08); }
 
 .header-actions {
   display: flex;
-  gap: 0.6rem;
+  gap: 0.5rem;
   align-items: center;
-}
-
-.header-actions .btn {
-  padding: 0.6rem 1.2rem;
-  font-size: 0.9rem;
-}
-
-.btn-action {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  border: none;
-  border-radius: var(--radius);
-  cursor: pointer;
-  transition: var(--transition);
-  padding: 0.6rem 1.2rem;
-  font-weight: 500;
-  font-size: 0.9rem;
-}
-
-.btn-play {
-  background: var(--success);
-  color: white;
-}
-
-.btn-play:hover:not(:disabled) {
-  background: #059669;
-}
-
-.btn-play svg,
-.btn-pause svg {
-  width: 18px;
-  height: 18px;
-  flex-shrink: 0;
-}
-
-.btn-pause {
-  background: var(--warning);
-  color: white;
-}
-
-.btn-pause:hover:not(:disabled) {
-  background: #d97706;
 }
 
 @media (max-width: 768px) {
-  .status-grid {
-    grid-template-columns: 1fr;
-  }
-  .page-header {
-    flex-direction: column;
-    gap: 0.75rem;
-  }
+  .status-grid { grid-template-columns: 1fr; }
+  .page-header { flex-direction: column; gap: 0.75rem; }
 }
 </style>

@@ -15,7 +15,7 @@
           <tr>
             <th>时间</th>
             <th>标题</th>
-            <th>通知状态</th>
+            <th>通知</th>
           </tr>
         </thead>
         <tbody>
@@ -25,8 +25,8 @@
               <a :href="r.URL" target="_blank" rel="noopener" class="record-link">{{ r.Title }}</a>
             </td>
             <td>
-              <span class="notify-status" :class="r.Notified ? 'notified' : 'pending'">
-                {{ r.Notified ? '✅ 已推送' : '⏳ 待推送' }}
+              <span class="notify-badge" :class="r.Notified ? 'notified' : 'pending'">
+                {{ r.Notified ? '已推送' : '待推送' }}
               </span>
             </td>
           </tr>
@@ -54,21 +54,37 @@ function formatTime(t) {
 
 <style scoped>
 .record-link {
-  color: var(--primary);
+  color: var(--text);
   text-decoration: none;
+  transition: var(--transition);
 }
 
 .record-link:hover {
-  text-decoration: underline;
+  color: var(--green);
 }
 
-.notify-status {
-  font-size: 0.8rem;
+.notify-badge {
+  display: inline-block;
+  padding: 0.1rem 0.5rem;
+  border-radius: var(--radius-pill);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+
+.notify-badge.notified {
+  background: var(--success-bg);
+  color: var(--success);
+}
+
+.notify-badge.pending {
+  background: var(--bg-elevated);
+  color: var(--text-muted);
 }
 
 .cell-time {
   white-space: nowrap;
-  color: var(--text-secondary);
-  font-size: 0.8rem;
+  color: var(--text-muted);
+  font-size: 0.75rem;
 }
 </style>
