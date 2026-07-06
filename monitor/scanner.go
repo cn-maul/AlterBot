@@ -6,11 +6,10 @@ import (
 	"strings"
 
 	"github.com/PuerkitoBio/goquery"
-	"github.com/cn-maul/AlterBot/database"
-	"github.com/cn-maul/AlterBot/fetcher"
+	"github.com/cn-maul/Gentry/database"
+	"github.com/cn-maul/Gentry/fetcher"
 )
 
-// 包级别类型定义（不可在函数内定义方法）
 type scanContainerKey struct {
 	tag      string
 	selector string
@@ -124,7 +123,7 @@ func SmartScan(settings *ScanSettings) (*ScanResult, error) {
 		extractContainerItems(entry)
 	}
 
-	// 4. 按匹配数排序
+	// 4. 按匹配数排序，并提高"有实际标题"容器的优先级
 	sortScanContainers(containerOrder, containerMap)
 
 	maxContainers := 3
@@ -148,12 +147,14 @@ func SmartScan(settings *ScanSettings) (*ScanResult, error) {
 			KeywordHits:  entry.hits,
 		}
 
-		maxItems := 10
-		if len(entry.items) > maxItems {
-			info.SampleItems = entry.items[:maxItems]
-		} else {
-			info.SampleItems = entry.items
-		}
+			maxItems := 10
+			if len(entry.items) > maxItems {
+				info.SampleItems = entry.items[:maxItems]
+			} else if len(entry.items) > 0 {
+				info.SampleItems = entry.items
+			} else {
+				info.SampleItems = []ExtractResult{}
+			}
 
 		result.Containers = append(result.Containers, info)
 	}
@@ -162,39 +163,87 @@ func SmartScan(settings *ScanSettings) (*ScanResult, error) {
 }
 
 // findBestContainer 寻找最适合作为容器的祖先元素
+// 使用评分制：遍历所有祖先，找出最精确的那个容器
 func findBestContainer(sel *goquery.Selection, doc *goquery.Document) *goquery.Selection {
+	type scoredContainer struct {
+		sel   *goquery.Selection
+		score int
+	}
+	var best scoredContainer
+
 	current := sel
 	depth := 0
-	maxDepth := 10
+	maxDepth := 15
 
 	for current != nil && depth < maxDepth {
 		tag := goquery.NodeName(current)
-		if isContainerTag(tag) {
-			children := current.Children()
+		class, _ := current.Attr("class")
 
+		if isContainerTag(tag) || hasArticleClass(class) {
+			children := current.Children()
 			childCount := 0
+			linkCount := 0
+			articleCardCount := 0
+			hasLinks := 0
+
 			children.Each(func(_ int, c *goquery.Selection) {
 				ctag := goquery.NodeName(c)
-				if isListItemTag(ctag) {
+				cclass, _ := c.Attr("class")
+
+				if isListItemTag(ctag) || hasArticleItemClass(cclass) {
 					childCount++
+				}
+
+				if c.Find("a").Length() > 0 {
+					linkCount++
+				}
+
+				if c.Find("a").Find("img").Length() > 0 || c.Find("img").Length() > 0 {
+					hasLinks++
+				}
+
+				if hasArticleItemClass(cclass) {
+					articleCardCount++
 				}
 			})
 
-			if childCount >= 2 {
-				linkCount := 0
-				children.Each(func(i int, c *goquery.Selection) {
-					if c.Find("a").Length() > 0 {
-						linkCount++
-					}
-				})
+			// 评分系统
+			score := 0
 
-				if childCount > 0 && linkCount >= childCount/2 {
-					return current
+			// article-card 模式是最明确的信号
+			score += articleCardCount * 100
+
+			// 子项数量
+			score += childCount * 10
+
+			// 链接数量很重要
+			score += linkCount * 5
+
+			// 传统列表模式
+			if childCount >= 2 && linkCount >= childCount/2 {
+				score += 50
+			}
+
+			// 深度加分：更深 = 更精确
+			score += depth * 2
+
+			// 排除页脚/导航等低质量容器
+			lowerClass := strings.ToLower(class)
+			if strings.Contains(lowerClass, "footer") || strings.Contains(lowerClass, "header") ||
+				strings.Contains(lowerClass, "nav") || strings.Contains(lowerClass, "sidebar") ||
+				strings.Contains(lowerClass, "menu") || strings.Contains(lowerClass, "banner") {
+				score = 0
+			}
+
+			// 排除 section__wrapper 中不是 feed 的
+			if strings.Contains(lowerClass, "section__wrapper") {
+				if !strings.Contains(lowerClass, "feed") && articleCardCount == 0 {
+					score -= 20
 				}
 			}
 
-			if childCount >= 3 && depth <= 3 {
-				return current
+			if score > best.score {
+				best = scoredContainer{sel: current, score: score}
 			}
 		}
 
@@ -206,6 +255,20 @@ func findBestContainer(sel *goquery.Selection, doc *goquery.Document) *goquery.S
 		depth++
 	}
 
+	// 如果找到有意义的容器，返回它
+	if best.score >= 20 {
+		return best.sel
+	}
+
+	// 回退：查找最近的 ul/ol 列表
+	nearestList := sel.Closest("ul, ol")
+	if nearestList.Length() > 0 {
+		liCount := nearestList.Find("li").Length()
+		if liCount >= 2 {
+			return nearestList
+		}
+	}
+
 	return nil
 }
 
@@ -213,14 +276,53 @@ func isContainerTag(tag string) bool {
 	containers := map[string]bool{
 		"div": true, "section": true, "ul": true, "ol": true,
 		"table": true, "tbody": true, "dl": true,
+		"article": true, "main": true, "nav": false,
 	}
 	return containers[tag]
+}
+
+func hasArticleClass(class string) bool {
+	// 检测常见的文章列表容器类名
+	lower := strings.ToLower(class)
+	markers := []string{
+		"article-list", "articlelist", "post-list", "postlist",
+		"news-list", "newslist", "content-list", "contentlist",
+		"feed", "feed__main", "feed_main",
+		"list-view", "card-list", "cardlist",
+		"section__wrapper", "section_wrapper",
+	}
+	for _, m := range markers {
+		if strings.Contains(lower, m) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasArticleItemClass(class string) bool {
+	lower := strings.ToLower(class)
+	markers := []string{
+		"article-card", "articlecard", "article__card", "post-card", "postcard",
+		"news-item", "newsitem", "content-item", "contentitem",
+		"feed-item", "feeditem", "card-item", "carditem",
+		"list-item", "listitem",
+	}
+	for _, m := range markers {
+		if strings.Contains(lower, m) {
+			return true
+		}
+	}
+	// 也检测以 article 或 post 开头的特定 class 模式
+	if strings.HasPrefix(lower, "article") || strings.HasPrefix(lower, "post-") || strings.HasPrefix(lower, "news-") {
+		return true
+	}
+	return false
 }
 
 func isListItemTag(tag string) bool {
 	items := map[string]bool{
 		"li": true, "tr": true, "dd": true, "dt": true,
-		"div": true, "p": true,
+		"div": true, "p": true, "article": true,
 	}
 	return items[tag]
 }
@@ -251,86 +353,192 @@ func buildShortSelector(sel *goquery.Selection, tag string) string {
 		base = tag
 	}
 	children := sel.Children()
-	childTag := ""
-	childClass := ""
-	childrenCount := 0
+
+	// 统计每种标签的出现次数，以及是否有 article-card 类
+	type tagInfo struct {
+		tag   string
+		class string
+		count int
+	}
+	tagStats := make(map[string]*tagInfo)
+	articleCardCount := 0
+	var articleCardTag, articleCardClass string
 
 	children.Each(func(_ int, c *goquery.Selection) {
-		childrenCount++
 		ctag := goquery.NodeName(c)
-		if childTag == "" {
-			childTag = ctag
-		} else if childTag != ctag {
-			childTag = "mixed"
+		if _, exists := tagStats[ctag]; !exists {
+			tagStats[ctag] = &tagInfo{tag: ctag, count: 0}
 		}
-		cls, exists := c.Attr("class")
-		if exists && cls != "" && childClass == "" {
-			childClass = cls
+		tagStats[ctag].count++
+
+		// 记录第一个子项的 class
+		if tagStats[ctag].class == "" {
+			if cls, exists := c.Attr("class"); exists && cls != "" {
+				classes := strings.Fields(cls)
+				tagStats[ctag].class = classes[0]
+			}
+		}
+
+		// 检测是否 article-card 模式
+		cclass, _ := c.Attr("class")
+		if hasArticleItemClass(cclass) {
+			articleCardCount++
+			if articleCardTag == "" {
+				articleCardTag = ctag
+				classes := strings.Fields(cclass)
+				for _, cls := range classes {
+					if hasArticleItemClass(cls) {
+						articleCardClass = cls
+						break
+					}
+				}
+			}
 		}
 	})
 
-	if childTag != "" && childTag != "mixed" && childrenCount >= 2 {
-		if childClass != "" {
-			classes := strings.Fields(childClass)
-			return base + " > " + childTag + "." + classes[0]
-		}
-		return base + " > " + childTag
+	// 优先：如果检测到 article-card 模式，用 article-card 的标签和类
+	if articleCardCount >= 2 && articleCardTag != "" && articleCardClass != "" {
+		return base + " > " + articleCardTag + "." + articleCardClass
 	}
+	if articleCardCount >= 2 && articleCardTag != "" {
+		return base + " > " + articleCardTag
+	}
+
+	// 找到最常见的子标签
+	var bestTag *tagInfo
+	for _, info := range tagStats {
+		if bestTag == nil || info.count > bestTag.count {
+			bestTag = info
+		}
+	}
+
+	if bestTag != nil && bestTag.count >= 2 {
+		if bestTag.class != "" {
+			return base + " > " + bestTag.tag + "." + bestTag.class
+		}
+		return base + " > " + bestTag.tag
+	}
+
 	return base
 }
 
 func detectItemPattern(sel *goquery.Selection) (tag, css string) {
 	children := sel.Children()
-	childTag := ""
-	count := 0
+	articleCardCount := 0
+	var articleCardTag, articleCardClass string
 
+	// 优先检测 article-card 模式
 	children.Each(func(_ int, c *goquery.Selection) {
-		count++
-		ctag := goquery.NodeName(c)
-		if childTag == "" || childTag == ctag {
-			childTag = ctag
-		} else {
-			childTag = "mixed"
+		cclass, _ := c.Attr("class")
+		if hasArticleItemClass(cclass) {
+			articleCardCount++
+			ctag := goquery.NodeName(c)
+			if articleCardTag == "" {
+				articleCardTag = ctag
+				classes := strings.Fields(cclass)
+				for _, cls := range classes {
+					if hasArticleItemClass(cls) {
+						articleCardClass = cls
+						break
+					}
+				}
+			}
 		}
 	})
 
-	if count < 2 || childTag == "" || childTag == "mixed" {
-		return "", ""
+	if articleCardCount >= 2 && articleCardTag != "" && articleCardClass != "" {
+		return articleCardTag, articleCardTag + "." + articleCardClass
 	}
-
-	if cls, exists := children.First().Attr("class"); exists && cls != "" {
-		classes := strings.Fields(cls)
-		return childTag, childTag + "." + classes[0]
+	if articleCardCount >= 2 && articleCardTag != "" {
+		return articleCardTag, articleCardTag
 	}
-	return childTag, childTag
+	return "", ""
 }
 
 func extractContainerItems(entry *scanContainerEntry) {
 	entry.parent.Children().Each(func(_ int, c *goquery.Selection) {
 		ctag := goquery.NodeName(c)
-		if !isListItemTag(ctag) {
+		cclass, _ := c.Attr("class")
+
+		// 接受：列表项标签 或 article-card 类
+		if !isListItemTag(ctag) && !hasArticleItemClass(cclass) {
 			return
 		}
 
 		item := make(ExtractResult)
-		titleSel := c.Find("a").First()
-		if titleSel.Length() > 0 {
-			item["title"] = strings.TrimSpace(titleSel.Text())
-			if href, exists := titleSel.Attr("href"); exists {
-				item["url"] = href
+
+		// 策略 1: 先找标题类名元素（最精确）
+		titleClasses := []string{
+			"article__card__title", "article-card__title", "post-card__title",
+			"card__title", "item__title", "news__title", "title",
+			"article-title", "post-title", "entry-title",
+		}
+		for _, cls := range titleClasses {
+			titleEl := c.Find("." + strings.ReplaceAll(cls, " ", "."))
+			if titleEl.Length() > 0 {
+				text := strings.TrimSpace(titleEl.Text())
+				if text != "" {
+					item["title"] = text
+					// 从标题元素内找链接
+					link := titleEl.Find("a").First()
+					if link.Length() > 0 {
+						if href, exists := link.Attr("href"); exists {
+							item["url"] = href
+						}
+					}
+					break
+				}
 			}
-		} else {
-			item["title"] = strings.TrimSpace(c.Text())
 		}
 
-		c.Find("span, time, small, .date, .time").Each(func(_ int, s *goquery.Selection) {
+		// 策略 2: 从链接中找标题（优先找文章链接，跳过作者/头像链接）
+		if item["title"] == "" {
+			var bestTitle, bestURL string
+			c.Find("a").Each(func(_ int, a *goquery.Selection) {
+				href, _ := a.Attr("href")
+				text := strings.TrimSpace(a.Text())
+				if text == "" {
+					return
+				}
+				// 优先选择：URL 包含 /post/ 的链接，其次是标题较长的链接
+				isBetter := false
+				if strings.Contains(href, "/post/") || strings.Contains(href, "/article/") || strings.Contains(href, "/item/") {
+					isBetter = true
+				} else if bestTitle == "" || len(text) > len(bestTitle) {
+					isBetter = true
+				}
+				if isBetter {
+					bestTitle, bestURL = text, href
+				}
+			})
+			if bestTitle != "" {
+				item["title"] = bestTitle
+				if bestURL != "" {
+					item["url"] = bestURL
+				}
+			}
+		}
+
+		// 如果还是没有标题，回退到卡片文本并截取前 80 字
+		if item["title"] == "" {
+			text := strings.TrimSpace(c.Text())
+			if text != "" {
+				if len(text) > 80 {
+					text = text[:80] + "..."
+				}
+				item["title"] = text
+			}
+		}
+
+		// 提取日期
+		c.Find("span, time, small, .date, .time, .meta, .publish").Each(func(_ int, s *goquery.Selection) {
 			text := strings.TrimSpace(s.Text())
-			if isDateLike(text) {
+			if isDateLike(text) && item["date"] == "" {
 				item["date"] = text
 			}
 		})
 
-		if len(item) > 0 {
+		if len(item) > 0 && item["title"] != "" {
 			entry.items = append(entry.items, item)
 			entry.itemsSel = append(entry.itemsSel, c)
 		}
@@ -354,11 +562,49 @@ func isDateLike(text string) bool {
 func sortScanContainers(keys []scanContainerKey, m map[scanContainerKey]*scanContainerEntry) {
 	for i := 0; i < len(keys); i++ {
 		for j := i + 1; j < len(keys); j++ {
-			if m[keys[j]].hits > m[keys[i]].hits {
+			ei := m[keys[i]]
+			ej := m[keys[j]]
+
+			// 计算容器内 article-card 实际数量（不依赖提取结果）
+			realCountI := countArticleCards(ei.parent)
+			realCountJ := countArticleCards(ej.parent)
+
+			// 计算有效标题数（非空标题）
+			validI := 0
+			for _, item := range ei.items {
+				if title, ok := item["title"]; ok && title != "" {
+					validI++
+				}
+			}
+			validJ := 0
+			for _, item := range ej.items {
+				if title, ok := item["title"]; ok && title != "" {
+					validJ++
+				}
+			}
+
+			// 排序优先级：article-card 子项数 > 有效标题数 > 总条数 > 关键词命中
+			scoreI := realCountI*10000 + validI*100 + len(ei.items)*10 + ei.hits
+			scoreJ := realCountJ*10000 + validJ*100 + len(ej.items)*10 + ej.hits
+
+			if scoreJ > scoreI {
 				keys[i], keys[j] = keys[j], keys[i]
 			}
 		}
 	}
+}
+
+// countArticleCards 统计容器内 article-card 子项数量
+func countArticleCards(sel *goquery.Selection) int {
+	count := 0
+	sel.Children().Each(func(_ int, c *goquery.Selection) {
+		ctag := goquery.NodeName(c)
+		cclass, _ := c.Attr("class")
+		if isListItemTag(ctag) || hasArticleItemClass(cclass) {
+			count++
+		}
+	})
+	return count
 }
 
 // MonitorFromScan 从扫描结果创建并启动监控器
@@ -375,6 +621,25 @@ func MonitorFromScan(name, url, containerCSS string) (*Monitor, error) {
 		itemSel = "a"
 	}
 
+	// 智能选择字段选择器
+	// 根据 item 类型选择合适的标题和链接提取方式
+	titleSelector := "a"
+	urlSelector := "a"
+	itemLower := strings.ToLower(itemSel)
+
+	if strings.Contains(itemLower, "article__card") || strings.Contains(itemLower, "article-card") {
+		// article-card 模式：标题在 .article__card__title 或 h3 中
+		// URL 在 .article__card__link 中
+		titleSelector = ".article__card__title, .article-card__title, h3"
+		urlSelector = ".article__card__link, .article-card__link"
+	} else if strings.Contains(itemLower, "article") || itemLower == "article" {
+		// 通用 article 模式：用类名精确匹配
+		titleSelector = "h3, h2, .title, a"
+	} else if strings.HasPrefix(itemLower, "div.") || strings.HasPrefix(itemLower, "li.") {
+		// 带 class 的 div/li：优先用 class 内的链接
+		titleSelector = "a"
+	}
+
 	site := &database.Site{
 		Name:          name,
 		URL:           url,
@@ -384,8 +649,8 @@ func MonitorFromScan(name, url, containerCSS string) (*Monitor, error) {
 		CheckInterval: 3600,
 		IsActive:      true,
 		Fields: []database.SiteField{
-			{Name: "title", Selector: "a", Type: "text"},
-			{Name: "url", Selector: "a", Type: "attr", Attr: "href"},
+			{Name: "title", Selector: titleSelector, Type: "text"},
+			{Name: "url", Selector: urlSelector, Type: "attr", Attr: "href"},
 		},
 	}
 

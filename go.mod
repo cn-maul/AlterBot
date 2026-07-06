@@ -1,4 +1,4 @@
-module github.com/cn-maul/AlterBot
+module github.com/cn-maul/Gentry
 
 go 1.25rc2
 

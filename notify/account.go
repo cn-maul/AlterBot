@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/cn-maul/AlterBot/database"
+	"github.com/cn-maul/Gentry/database"
 )
 
 // SendToAccount 使用指定推送账户发送通知

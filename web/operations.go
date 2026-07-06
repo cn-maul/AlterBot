@@ -7,9 +7,9 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/cn-maul/AlterBot/database"
-	"github.com/cn-maul/AlterBot/monitor"
-	"github.com/cn-maul/AlterBot/notify"
+	"github.com/cn-maul/Gentry/database"
+	"github.com/cn-maul/Gentry/monitor"
+	"github.com/cn-maul/Gentry/notify"
 	"github.com/gin-gonic/gin"
 )
 

@@ -8,10 +8,10 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/cn-maul/AlterBot/database"
-	"github.com/cn-maul/AlterBot/monitor"
-	"github.com/cn-maul/AlterBot/notify"
-	"github.com/cn-maul/AlterBot/web"
+	"github.com/cn-maul/Gentry/database"
+	"github.com/cn-maul/Gentry/monitor"
+	"github.com/cn-maul/Gentry/notify"
+	"github.com/cn-maul/Gentry/web"
 )
 
 //go:embed frontend/dist
@@ -19,10 +19,10 @@ var frontendDist embed.FS
 
 func main() {
 	log.SetFlags(log.Ldate | log.Ltime | log.Lshortfile)
-	log.Println("=== AlterBot 网页变更监控系统 ===")
+	log.Println("=== Gentry 网页变更监控系统 ===")
 
 	// 1. 初始化数据库
-	dbPath := "alterbot.db"
+	dbPath := "gentry.db"
 	if err := database.Init(dbPath); err != nil {
 		log.Fatalf("数据库初始化失败: %v", err)
 	}
@@ -50,7 +50,7 @@ func main() {
 	// 4. 启动 Web 服务
 	ws := web.NewWebServer(frontendFS)
 	go func() {
-		addr := ":8080"
+		addr := ":" + getPort()
 		log.Printf("[Web] 服务启动: http://localhost%s", addr)
 		if err := ws.Run(addr); err != nil {
 			log.Fatalf("Web 服务启动失败: %v", err)
@@ -64,6 +64,14 @@ func main() {
 	log.Printf("收到信号 %v，正在停止所有监控器...", sig)
 
 	monitor.StopAll()
-	log.Println("AlterBot 已安全退出")
+	log.Println("Gentry 已安全退出")
+}
+
+// getPort 读取 PORT 环境变量，默认 8080
+func getPort() string {
+	if p := os.Getenv("PORT"); p != "" {
+		return p
+	}
+	return "8080"
 }
 

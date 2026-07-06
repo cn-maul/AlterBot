@@ -10,7 +10,7 @@
               <path d="M12 6c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6-2.69-6-6-6zm0 10c-2.21 0-4-1.79-4-4s1.79-4 4-4 4 1.79 4 4-1.79 4-4 4z"/>
             </svg>
           </span>
-          <span class="brand-text">AlterBot</span>
+          <span class="brand-text">Gentry</span>
         </router-link>
         <div class="nav-links">
           <router-link to="/" class="nav-link" :class="{ active: $route.path === '/' }">
@@ -41,12 +41,12 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 
-const STORAGE_KEY = 'alterbot_theme'
+const STORAGE_KEY = 'gentry_theme'
 
-const isDark = ref(true)
+const isDark = ref(false)
 
 function applyTheme(dark) {
-  document.documentElement.classList.toggle('light', !dark)
+  document.documentElement.classList.toggle('dark', dark)
   isDark.value = dark
   localStorage.setItem(STORAGE_KEY, dark ? 'dark' : 'light')
 }
@@ -57,10 +57,10 @@ function toggleTheme() {
 
 onMounted(() => {
   const saved = localStorage.getItem(STORAGE_KEY)
-  if (saved === 'light') {
-    applyTheme(false)
-  } else {
+  if (saved === 'dark') {
     applyTheme(true)
+  } else {
+    applyTheme(false)
   }
 })
 </script>
@@ -75,7 +75,7 @@ onMounted(() => {
 
 .navbar {
   background: var(--bg-base);
-  border-bottom: 1px solid #2a2a2a;
+  border-bottom: 1px solid var(--border);
   padding: 0 2rem;
   position: sticky;
   top: 0;

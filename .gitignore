@@ -1,4 +1,4 @@
-# AlterBot
+# Gentry
 examples
 .idea
 *.db
@@ -6,8 +6,11 @@ config.json
 config.private.json
 frontend/node_modules/
 frontend/dist/
-alterbot
-alterbot.exe
+gentry
+gentry.exe
 .claude/
 *.db-wal
 *.db-shm*.xlsx
+alterbot
+alterbot.exe
+dist/alterbot-*

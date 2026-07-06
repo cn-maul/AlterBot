@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cn-maul/AlterBot/database"
+	"github.com/cn-maul/Gentry/database"
 )
 
 // 全局监控器注册表

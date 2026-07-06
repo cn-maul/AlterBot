@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/cn-maul/AlterBot/monitor"
+	"github.com/cn-maul/Gentry/monitor"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 )
