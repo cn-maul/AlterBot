@@ -39,6 +39,24 @@
             <label>检查间隔（秒）</label>
             <input v-model.number="form.check_interval" class="form-input" type="number" min="10" placeholder="3600（默认1小时）" />
           </div>
+
+          <div class="form-group">
+            <label>推送过滤</label>
+            <div class="filter-mode-row">
+              <label class="radio-label" :class="{ active: form.notify_filter === 'all' }">
+                <input type="radio" v-model="form.notify_filter" value="all" />
+                有新内容就推送
+              </label>
+              <label class="radio-label" :class="{ active: form.notify_filter === 'keyword' }">
+                <input type="radio" v-model="form.notify_filter" value="keyword" />
+                仅命中关键词时推送
+              </label>
+            </div>
+            <div class="form-group" v-if="form.notify_filter === 'keyword'" style="margin-top: 0.5rem;">
+              <label>推送关键词（多个用逗号隔开）</label>
+              <input v-model="form.notify_keywords" class="form-input" placeholder="面试,录用,公示" />
+            </div>
+          </div>
         </div>
 
         <div class="settings-section">
@@ -236,6 +254,23 @@
             <label>检查间隔（秒）</label>
             <input v-model.number="form.check_interval" class="form-input" type="number" min="10" placeholder="3600（默认1小时）" />
           </div>
+          <div class="form-group">
+            <label>推送过滤</label>
+            <div class="filter-mode-row">
+              <label class="radio-label" :class="{ active: form.notify_filter === 'all' }">
+                <input type="radio" v-model="form.notify_filter" value="all" />
+                有新内容就推送
+              </label>
+              <label class="radio-label" :class="{ active: form.notify_filter === 'keyword' }">
+                <input type="radio" v-model="form.notify_filter" value="keyword" />
+                仅命中关键词时推送
+              </label>
+            </div>
+            <div class="form-group" v-if="form.notify_filter === 'keyword'" style="margin-top: 0.5rem;">
+              <label>推送关键词（多个用逗号隔开）</label>
+              <input v-model="form.notify_keywords" class="form-input" placeholder="面试,录用,公示" />
+            </div>
+          </div>
         </div>
         <div class="settings-section">
           <div class="section-header"><h2>提取配置</h2></div>
@@ -283,6 +318,8 @@ const loading = ref(false)
 const form = ref({
   name: '', url: '', group: '', container: '', item: '',
   check_interval: 3600, is_active: true,
+  notify_filter: 'all', notify_keywords: '',
+  notify_account_ids: '',
   fields: [{ name: 'title', selector: 'a', type: 'text', attr: '', transform: '' }],
 })
 
@@ -333,6 +370,9 @@ onMounted(async () => {
         form.value.item = d.Item || ''
         form.value.check_interval = d.CheckInterval || 3600
         form.value.is_active = d.IsActive ?? true
+        form.value.notify_filter = d.NotifyFilter || 'all'
+        form.value.notify_keywords = d.NotifyKeywords || ''
+        form.value.notify_account_ids = d.NotifyAccountIDs || ''
         if (d.Fields && d.Fields.length > 0) {
           form.value.fields = d.Fields.map(f => ({
             name: f.Name || '', selector: f.Selector || '',
@@ -370,6 +410,9 @@ async function handleSubmit() {
       container: form.value.container.trim(), item: form.value.item.trim(),
       group: form.value.group.trim(), check_interval: form.value.check_interval || 3600,
       is_active: form.value.is_active,
+      notify_filter: form.value.notify_filter,
+      notify_keywords: form.value.notify_filter === 'keyword' ? form.value.notify_keywords || '' : '',
+      notify_account_ids: form.value.notify_account_ids || '',
       fields: form.value.fields.filter(f => f.name.trim() && f.selector.trim()),
     }
     if (isEdit.value) {
@@ -526,4 +569,18 @@ async function handleCreate() {
   transition: var(--transition); margin-bottom: 0.5rem;
 }
 .back-btn:hover { background: var(--bg-hover); color: var(--text); }
+
+.filter-mode-row {
+  display: flex; gap: 0.5rem; margin-top: 0.25rem;
+}
+.radio-label {
+  display: flex; align-items: center; gap: 0.4rem;
+  padding: 0.45rem 0.85rem; border-radius: var(--radius-pill);
+  font-size: 0.8125rem; font-weight: 700; cursor: pointer;
+  background: var(--bg-surface); color: var(--text-secondary);
+  transition: var(--transition);
+}
+.radio-label:hover { background: var(--bg-elevated); color: var(--text); }
+.radio-label.active { background: var(--green); color: #000; }
+.radio-label input { display: none; }
 </style>

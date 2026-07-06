@@ -65,6 +65,16 @@ export function markAllNotified(name) {
   return client.put(`/monitors/${encodeURIComponent(name)}/mark-all-notified`).then(r => r.data)
 }
 
+// 标记监控器已读（未读计数归零）
+export function markRead(name) {
+  return client.post(`/monitors/${encodeURIComponent(name)}/mark-read`).then(r => r.data)
+}
+
+// 更新监控器的推送账户
+export function updateNotifyAccounts(name, accountIDs) {
+  return client.put(`/monitors/${encodeURIComponent(name)}/notify-accounts`, { notify_account_ids: accountIDs }).then(r => r.data)
+}
+
 // 智能扫描：预览网页内容
 export function previewScan(params) {
   return client.post('/monitors/preview', params).then(r => r.data)
@@ -80,12 +90,34 @@ export function healthCheck() {
   return rootClient.get('/health').then(r => r.data)
 }
 
-// 获取通知设置
+// 获取通知设置（仅开关）
 export function fetchNotificationSettings() {
   return rootClient.get('/settings/notifications').then(r => r.data)
 }
 
-// 更新通知设置
+// 更新通知开关
 export function updateNotificationSettings(settings) {
   return rootClient.put('/settings/notifications', settings).then(r => r.data)
+}
+
+// ===== 推送账户 CRUD =====
+
+// 获取所有推送账户
+export function fetchAccounts() {
+  return rootClient.get('/settings/notification-accounts').then(r => r.data)
+}
+
+// 创建推送账户
+export function createAccount(data) {
+  return rootClient.post('/settings/notification-accounts', data).then(r => r.data)
+}
+
+// 更新推送账户
+export function updateAccount(id, data) {
+  return rootClient.put(`/settings/notification-accounts/${id}`, data).then(r => r.data)
+}
+
+// 删除推送账户
+export function deleteAccount(id) {
+  return rootClient.delete(`/settings/notification-accounts/${id}`).then(r => r.data)
 }

@@ -1,6 +1,9 @@
 package database
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // Site 监控站点配置
 type Site struct {
@@ -16,7 +19,13 @@ type Site struct {
 	CheckInterval int        `gorm:"default:3600"`
 	IsActive      bool       `gorm:"default:false"`
 	LastCheckAt   *time.Time `gorm:"index"`
-	Fields        []SiteField
+	// NotifyFilter 推送过滤模式: all=推送所有更新, keyword=仅推送命中关键词的更新
+	NotifyFilter   string `gorm:"size:20;default:all"`
+	// NotifyKeywords 推送关键词（逗号分隔），仅 NotifyFilter=keyword 时生效
+	NotifyKeywords string `gorm:"size:500"`
+	// NotifyAccountIDs 启用的推送账户 ID 列表（JSON 数组，如 "[1,3,5]"）
+	NotifyAccountIDs string `gorm:"size:500"`
+	Fields           []SiteField
 }
 
 // SiteField 提取字段配置
@@ -46,10 +55,22 @@ type UpdateRecord struct {
 	IsRead     bool       `gorm:"default:false"`
 }
 
+// NotificationAccount 推送账户配置
+type NotificationAccount struct {
+	ID        uint   `gorm:"primarykey"`
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	Name      string `gorm:"size:100;uniqueIndex"`
+	Service   string `gorm:"size:50"`
+	// ConfigJSON 序列化的账户配置（pushplus: {token,channel}, webhook: {url,method}）
+	ConfigJSON string `gorm:"type:text"`
+}
+
 // TableName 自定义表名
 func (Site) TableName() string { return "sites" }
 func (SiteField) TableName() string { return "site_fields" }
 func (UpdateRecord) TableName() string { return "update_records" }
+func (NotificationAccount) TableName() string { return "notification_accounts" }
 
 // SystemSetting 系统设置键值对
 type SystemSetting struct {
@@ -68,4 +89,16 @@ func (s *Site) GetCheckInterval() time.Duration {
 	default:
 		return time.Duration(s.CheckInterval) * time.Second
 	}
+}
+
+// GetNotifyAccountIDs 解析启用的推送账户 ID 列表
+func (s *Site) GetNotifyAccountIDs() []uint {
+	if s.NotifyAccountIDs == "" {
+		return nil
+	}
+	var ids []uint
+	if err := json.Unmarshal([]byte(s.NotifyAccountIDs), &ids); err != nil {
+		return nil
+	}
+	return ids
 }

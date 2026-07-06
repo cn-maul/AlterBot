@@ -15,14 +15,17 @@ import (
 
 // addMonitorRequest 创建监控器的请求体
 type addMonitorRequest struct {
-	Name          string              `json:"name" binding:"required"`
-	URL           string              `json:"url" binding:"required"`
-	Container     string              `json:"container" binding:"required"`
-	Item          string              `json:"item"`
-	Group         string              `json:"group"`
-	CheckInterval int                 `json:"check_interval"`
-	IsActive      bool                `json:"is_active"`
-	Fields        []fieldRequest      `json:"fields"`
+	Name           string         `json:"name" binding:"required"`
+	URL            string         `json:"url" binding:"required"`
+	Container      string         `json:"container" binding:"required"`
+	Item           string         `json:"item"`
+	Group          string         `json:"group"`
+	CheckInterval  int            `json:"check_interval"`
+	IsActive       bool           `json:"is_active"`
+	NotifyFilter   string         `json:"notify_filter"`
+	NotifyKeywords string         `json:"notify_keywords"`
+	NotifyAccountIDs string       `json:"notify_account_ids"`
+	Fields         []fieldRequest `json:"fields"`
 }
 
 type fieldRequest struct {
@@ -47,6 +50,9 @@ func dbSiteFromRequest(req *addMonitorRequest) *database.Site {
 		GroupName:     group,
 		CheckInterval: req.CheckInterval,
 		IsActive:      req.IsActive,
+		NotifyFilter:   req.NotifyFilter,
+		NotifyKeywords: req.NotifyKeywords,
+		NotifyAccountIDs: req.NotifyAccountIDs,
 	}
 	for _, f := range req.Fields {
 		ft := f.Type
@@ -202,6 +208,9 @@ func (s *WebServer) updateMonitor(c *gin.Context) {
 	site.GroupName = group
 	site.CheckInterval = req.CheckInterval
 	site.IsActive = req.IsActive
+	site.NotifyFilter = req.NotifyFilter
+	site.NotifyKeywords = req.NotifyKeywords
+	site.NotifyAccountIDs = req.NotifyAccountIDs
 	database.GetDB().Save(&site)
 
 	// 重设字段
@@ -303,6 +312,40 @@ func (s *WebServer) markAllNotified(c *gin.Context) {
 	}))
 }
 
+func (s *WebServer) markRead(c *gin.Context) {
+	name := c.Param("name")
+	monitor.MarkRead(name)
+	c.JSON(http.StatusOK, NewSuccessResponse(nil))
+}
+
+func (s *WebServer) updateNotifyAccounts(c *gin.Context) {
+	name := c.Param("name")
+	var req struct {
+		AccountIDs string `json:"notify_account_ids"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, NewErrorResponse(400, "参数错误: "+err.Error()))
+		return
+	}
+
+	var site database.Site
+	if err := database.GetDB().Where("name = ?", name).First(&site).Error; err != nil {
+		c.JSON(http.StatusNotFound, NewErrorResponse(404, "monitor not found"))
+		return
+	}
+
+	site.NotifyAccountIDs = req.AccountIDs
+	database.GetDB().Save(&site)
+
+	// 同步更新运行中的监控器实例（避免下次检查周期仍用旧配置）
+	if m := monitor.GetMonitor(name); m != nil {
+		m.UpdateSiteNotifyAccounts(site.NotifyAccountIDs)
+	}
+
+	log.Printf("[Web] 更新 %s 的推送账户: %s", name, req.AccountIDs)
+	c.JSON(http.StatusOK, NewSuccessResponse(nil))
+}
+
 func (s *WebServer) listGroups(c *gin.Context) {
 	var groups []string
 	database.GetDB().Model(&database.Site{}).
@@ -329,66 +372,100 @@ func (s *WebServer) healthCheck(c *gin.Context) {
 	}))
 }
 
-// 推送通知设置 API
+// ===== 推送账户 CRUD =====
+
+type accountRequest struct {
+	Name        string                 `json:"name" binding:"required"`
+	Service     string                 `json:"service" binding:"required"`
+	Config      map[string]interface{} `json:"config" binding:"required"`
+}
+
+func (s *WebServer) listAccounts(c *gin.Context) {
+	var accounts []database.NotificationAccount
+	database.GetDB().Order("created_at desc").Find(&accounts)
+	c.JSON(http.StatusOK, NewSuccessResponse(accounts))
+}
+
+func (s *WebServer) createAccount(c *gin.Context) {
+	var req accountRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, NewErrorResponse(400, "参数错误: "+err.Error()))
+		return
+	}
+
+	configJSON, _ := json.Marshal(req.Config)
+	account := &database.NotificationAccount{
+		Name:        req.Name,
+		Service:     req.Service,
+		ConfigJSON:  string(configJSON),
+	}
+	if err := database.GetDB().Create(account).Error; err != nil {
+		c.JSON(http.StatusConflict, NewErrorResponse(409, "创建账户失败: "+err.Error()))
+		return
+	}
+
+	log.Printf("[通知] 创建推送账户: %s (%s)", account.Name, account.Service)
+	c.JSON(http.StatusCreated, NewSuccessResponse(account))
+}
+
+func (s *WebServer) updateAccount(c *gin.Context) {
+	var req accountRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, NewErrorResponse(400, "参数错误: "+err.Error()))
+		return
+	}
+
+	id := c.Param("id")
+	var account database.NotificationAccount
+	if err := database.GetDB().First(&account, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, NewErrorResponse(404, "账户不存在"))
+		return
+	}
+
+	configJSON, _ := json.Marshal(req.Config)
+	account.Name = req.Name
+	account.Service = req.Service
+	account.ConfigJSON = string(configJSON)
+	database.GetDB().Save(&account)
+
+	log.Printf("[通知] 更新推送账户: %s", account.Name)
+	c.JSON(http.StatusOK, NewSuccessResponse(account))
+}
+
+func (s *WebServer) deleteAccount(c *gin.Context) {
+	id := c.Param("id")
+	result := database.GetDB().Delete(&database.NotificationAccount{}, id)
+	if result.RowsAffected == 0 {
+		c.JSON(http.StatusNotFound, NewErrorResponse(404, "账户不存在"))
+		return
+	}
+	c.JSON(http.StatusOK, NewSuccessResponse(nil))
+}
+
+// 推送全局开关
 
 func (s *WebServer) getNotificationSettings(c *gin.Context) {
 	enabledVal, _ := database.GetSetting("notifications_enabled")
 	enabled := enabledVal == "true"
 
-	service, _ := database.GetSetting("notification_service")
-	configRaw, _ := database.GetSetting("notification_config")
-
-	var config map[string]interface{}
-	if configRaw != "" {
-		json.Unmarshal([]byte(configRaw), &config)
-	}
-	if config == nil {
-		config = make(map[string]interface{})
-	}
-
 	c.JSON(http.StatusOK, NewSuccessResponse(map[string]interface{}{
 		"enabled": enabled,
-		"service": service,
-		"config":  config,
 	}))
 }
 
 func (s *WebServer) updateNotificationSettings(c *gin.Context) {
 	var req struct {
-		Enabled bool                   `json:"enabled"`
-		Service string                 `json:"service"`
-		Config  map[string]interface{} `json:"config"`
+		Enabled bool `json:"enabled"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, NewErrorResponse(400, "invalid request body: "+err.Error()))
+		c.JSON(http.StatusBadRequest, NewErrorResponse(400, "参数错误: "+err.Error()))
 		return
 	}
 
-	// 保存到数据库
 	database.SetSetting("notifications_enabled", fmt.Sprintf("%t", req.Enabled))
-	database.SetSetting("notification_service", req.Service)
-
-	if req.Config != nil {
-		configJSON, _ := json.Marshal(req.Config)
-		database.SetSetting("notification_config", string(configJSON))
-	}
-
-	// 更新运行时状态
 	notify.SetEnabled(req.Enabled)
 
-	// 如果启用了新服务且 notifier 未初始化，尝试初始化
-	if req.Enabled && notify.GetNotifier() == nil && req.Service != "" {
-		notify.Reset()
-		if err := notify.InitGlobalNotifier(req.Service, req.Config); err != nil {
-			c.JSON(http.StatusOK, NewSuccessResponse(map[string]interface{}{
-				"enabled": true,
-				"warning": "服务初始化失败: " + err.Error(),
-			}))
-			return
-		}
-	}
-
-	log.Printf("[通知] 推送设置已更新: enabled=%v service=%s", req.Enabled, req.Service)
+	log.Printf("[通知] 推送开关已更新: enabled=%v", req.Enabled)
 	c.JSON(http.StatusOK, NewSuccessResponse(nil))
 }
 

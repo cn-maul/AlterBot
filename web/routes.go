@@ -37,11 +37,19 @@ func (s *WebServer) setupRoutes() {
 		api.GET("/:name/updates", s.getUpdates)
 		api.GET("/:name/config", s.getMonitorConfig)
 		api.PUT("/:name/mark-all-notified", s.markAllNotified)
+		api.POST("/:name/mark-read", s.markRead)
+		api.PUT("/:name/notify-accounts", s.updateNotifyAccounts)
 	}
 
 	// 智能扫描（在 api 组之外，避免 :name 通配符冲突）
 	s.engine.POST("/api/v1/monitors/preview", s.previewScan)
 	s.engine.POST("/api/v1/monitors/smart-create", s.smartCreate)
+
+	// 推送账户 CRUD
+	s.engine.GET("/api/settings/notification-accounts", s.listAccounts)
+	s.engine.POST("/api/settings/notification-accounts", s.createAccount)
+	s.engine.PUT("/api/settings/notification-accounts/:id", s.updateAccount)
+	s.engine.DELETE("/api/settings/notification-accounts/:id", s.deleteAccount)
 
 	if s.frontendFS != nil {
 		assets, err := fs.Sub(s.frontendFS, "assets")

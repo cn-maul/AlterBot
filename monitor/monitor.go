@@ -206,6 +206,11 @@ func (m *Monitor) Stop() {
 	})
 }
 
+// UpdateSiteNotifyAccounts 更新运行中监控器的推送账户（无需重启）
+func (m *Monitor) UpdateSiteNotifyAccounts(ids string) {
+	m.site.NotifyAccountIDs = ids
+}
+
 func (m *Monitor) loadLastResults() ([]ExtractResult, error) {
 	// 从数据库读取最近一次的提取结果
 	var records []database.UpdateRecord
@@ -275,39 +280,116 @@ func compareResults(last, current []ExtractResult) []ExtractResult {
 	return newItems
 }
 
+// matchKeywords 检查更新项是否命中任一关键词（大小写不敏感）
+func matchKeywords(item ExtractResult, keywordList []string) bool {
+	if len(keywordList) == 0 {
+		return true
+	}
+	for _, kw := range keywordList {
+		kw = strings.TrimSpace(kw)
+		if kw == "" {
+			continue
+		}
+		kwLower := strings.ToLower(kw)
+		for _, v := range item {
+			str, ok := v.(string)
+			if !ok || str == "" {
+				continue
+			}
+			if strings.Contains(strings.ToLower(str), kwLower) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// filterByKeywords 根据关键词过滤更新项，仅返回命中任一关键词的项
+func filterByKeywords(items []ExtractResult, keywords string) []ExtractResult {
+	if keywords == "" {
+		return items
+	}
+	kwList := strings.Split(keywords, ",")
+	var matched []ExtractResult
+	for _, item := range items {
+		if matchKeywords(item, kwList) {
+			matched = append(matched, item)
+		}
+	}
+	return matched
+}
+
+func (m *Monitor) buildNotifyContent(items []ExtractResult) (string, string) {
+	// 推送给前端但前端不需要 content，保持原有格式
+	title := fmt.Sprintf("%s 有 %d 条更新", m.site.Name, len(items))
+	var content strings.Builder
+	content.WriteString("最新更新内容：\n")
+	for i, item := range items {
+		fmt.Fprintf(&content, "%d. %s\n   %s\n", i+1, item["title"], item["url"])
+	}
+	return title, content.String()
+}
+
 func (m *Monitor) sendCombinedNotification(items []ExtractResult) {
 	if !notify.IsEnabled() {
 		log.Printf("[%s] 推送已关闭，跳过 %d 条通知", m.site.Name, len(items))
 		return
 	}
-	if notifier := notify.GetNotifier(); notifier != nil {
-		title := fmt.Sprintf("%s 有 %d 条更新", m.site.Name, len(items))
 
-		var content strings.Builder
-		content.WriteString("最新更新内容：\n")
-		for i, item := range items {
-			fmt.Fprintf(&content, "%d. %s\n   %s\n", i+1, item["title"], item["url"])
-		}
-
-		if err := notifier.Send(title, content.String()); err != nil {
-			log.Printf("[%s] 推送失败: %v", m.site.Name, err)
+	// 如果启用了关键词过滤，只推送命中关键词的更新
+	if m.site.NotifyFilter == "keyword" && m.site.NotifyKeywords != "" {
+		matched := filterByKeywords(items, m.site.NotifyKeywords)
+		if len(matched) == 0 {
+			log.Printf("[%s] 关键词过滤后无匹配项，跳过推送", m.site.Name)
 			return
 		}
-
-		// 推送成功后标记数据库记录为已通知
-		now := time.Now()
-		for _, item := range items {
-			title := toString(item["title"])
-			urlStr := toString(item["url"])
-			database.GetDB().Model(&database.UpdateRecord{}).
-				Where("site_id = ? AND title = ? AND url = ? AND notified = ?", m.site.ID, title, urlStr, false).
-				Updates(map[string]interface{}{
-					"notified":     true,
-					"notified_at": now,
-				})
-		}
-		log.Printf("[%s] 推送成功，已标记 %d 条记录", m.site.Name, len(items))
+		items = matched
 	}
+
+	// 确定要推送的账户
+	accountIDs := m.site.GetNotifyAccountIDs()
+	if len(accountIDs) == 0 {
+		log.Printf("[%s] 未配置推送账户，跳过推送", m.site.Name)
+		return
+	}
+
+	title, content := m.buildNotifyContent(items)
+
+	var lastErr error
+	sentCount := 0
+	for _, accID := range accountIDs {
+		var account database.NotificationAccount
+		if err := database.GetDB().First(&account, accID).Error; err != nil {
+			log.Printf("[%s] 推送账户 #%d 不存在，跳过", m.site.Name, accID)
+			continue
+		}
+		if err := notify.SendToAccount(&account, title, content); err != nil {
+			log.Printf("[%s] 推送账户「%s」(%s) 发送失败: %v", m.site.Name, account.Name, account.Service, err)
+			lastErr = err
+			continue
+		}
+		sentCount++
+	}
+
+	if sentCount == 0 {
+		log.Printf("[%s] 所有推送账户均发送失败", m.site.Name)
+		return
+	}
+
+	// 推送成功后标记数据库记录为已通知
+	now := time.Now()
+	for _, item := range items {
+		itemTitle := toString(item["title"])
+		urlStr := toString(item["url"])
+		database.GetDB().Model(&database.UpdateRecord{}).
+			Where("site_id = ? AND title = ? AND url = ? AND notified = ?", m.site.ID, itemTitle, urlStr, false).
+			Updates(map[string]interface{}{
+				"notified":     true,
+				"notified_at": now,
+			})
+	}
+	log.Printf("[%s] 推送成功至 %d 个账户，已标记 %d 条记录", m.site.Name, sentCount, len(items))
+	_ = lastErr // 失败已单独打印
 }
 
 func extractKey(item ExtractResult) string {

@@ -22,7 +22,7 @@ func Init(dbPath string) error {
 	}
 
 	// 自动迁移 Schema
-	if err := DB.AutoMigrate(&Site{}, &SiteField{}, &UpdateRecord{}, &SystemSetting{}); err != nil {
+	if err := DB.AutoMigrate(&Site{}, &SiteField{}, &UpdateRecord{}, &NotificationAccount{}, &SystemSetting{}); err != nil {
 		return err
 	}
 

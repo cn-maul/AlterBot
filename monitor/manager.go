@@ -138,3 +138,16 @@ func Exists(name string) bool {
 	_, ok := monitors[name]
 	return ok
 }
+
+// MarkRead 将指定监控器的未读计数归零（用户已查看详情后调用）
+func MarkRead(name string) {
+	monitorsLock.RLock()
+	m, exists := monitors[name]
+	monitorsLock.RUnlock()
+	if !exists {
+		return
+	}
+	m.updateStatus(func(s *MonitorStatus) {
+		s.UpdatesCount = 0
+	})
+}
