@@ -1,6 +1,7 @@
 package monitor
 
 import (
+	"regexp"
 	"strings"
 
 	"github.com/PuerkitoBio/goquery"
@@ -120,15 +121,17 @@ func applyTransform(value, transform string) string {
 	case "regexp":
 		parts := strings.SplitN(args, ",", 2)
 		if len(parts) == 2 {
-			// 简单正则替换
 			pattern := strings.TrimSpace(parts[0])
 			replacement := strings.TrimSpace(parts[1])
 			// 去掉可能的引号
 			pattern = strings.Trim(pattern, `"'`)
 			replacement = strings.Trim(replacement, `"'`)
-			// 这里使用 strings.Replace 作为简单实现
-			// 更复杂的正则需求可后续扩展
-			return strings.ReplaceAll(value, pattern, replacement)
+			re, err := regexp.Compile(pattern)
+			if err != nil {
+				// 编译失败则返回原值
+				return value
+			}
+			return re.ReplaceAllString(value, replacement)
 		}
 		return value
 	default:

@@ -110,12 +110,15 @@ func (s *WebServer) removeMonitor(c *gin.Context) {
 	// 从注册表移除
 	monitor.UnregisterMonitor(name)
 
-	// 从数据库删除
-	result := database.GetDB().Where("name = ?", name).Delete(&database.Site{})
-	if result.RowsAffected == 0 {
+	// 从数据库删除（先清理关联数据）
+	var site database.Site
+	if err := database.GetDB().Where("name = ?", name).First(&site).Error; err != nil {
 		c.JSON(http.StatusNotFound, NewErrorResponse(404, "monitor not found"))
 		return
 	}
+	database.GetDB().Where("site_id = ?", site.ID).Delete(&database.SiteField{})
+	database.GetDB().Where("site_id = ?", site.ID).Delete(&database.UpdateRecord{})
+	database.GetDB().Delete(&site)
 
 	log.Printf("[Web] 删除监控器: %s", name)
 	c.JSON(http.StatusOK, NewSuccessResponse(nil))

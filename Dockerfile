@@ -9,7 +9,7 @@
 # ================================================================
 
 # ---- 构建参数 ----
-ARG GO_VERSION=1.26-alpine
+ARG GO_VERSION=1.25-alpine
 ARG NODE_VERSION=22-alpine
 ARG ALPINE_VERSION=3.21
 

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
 )
 
 func init() {
@@ -44,8 +45,9 @@ func (p *pushPlusNotifier) Send(title, content string) error {
 		return fmt.Errorf("JSON编码失败: %w", err)
 	}
 
-	resp, err := http.Post(
-		"http://www.pushplus.plus/send",
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Post(
+		"https://www.pushplus.plus/send",
 		"application/json",
 		bytes.NewBuffer(jsonData),
 	)

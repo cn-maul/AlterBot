@@ -110,11 +110,21 @@ func StartAllFromDB() {
 // StopAll 停止所有正在运行的监控器
 func StopAll() {
 	monitorsLock.RLock()
-	for name, m := range monitors {
-		m.Stop()
-		log.Printf("[%s] 监控器已停止", name)
+	names := make([]string, 0, len(monitors))
+	for name := range monitors {
+		names = append(names, name)
 	}
 	monitorsLock.RUnlock()
+
+	for _, name := range names {
+		monitorsLock.RLock()
+		m, exists := monitors[name]
+		monitorsLock.RUnlock()
+		if exists {
+			m.Stop()
+			log.Printf("[%s] 监控器已停止", name)
+		}
+	}
 	log.Println("[Monitor] 所有监控器已停止")
 }
 

@@ -171,19 +171,10 @@ func (m *Monitor) CheckForUpdates() ([]ExtractResult, error) {
 
 	newItems := compareResults(last, current)
 
+	// saveResults 保存所有当前结果到数据库（含 title+url 去重），
+	// 新条目会被记录为新 UpdateRecord，已存在的跳过
 	if err := m.saveResults(current); err != nil {
 		return nil, fmt.Errorf("save failed: %w", err)
-	}
-
-	// 将新变更保存到数据库更新记录
-	for _, item := range newItems {
-		record := &database.UpdateRecord{
-			SiteID:  m.site.ID,
-			Title:   toString(item["title"]),
-			URL:     toString(item["url"]),
-			Content: func() string { data, _ := json.Marshal(item); return string(data) }(),
-		}
-		database.GetDB().Create(record)
 	}
 
 	return newItems, nil
@@ -212,24 +203,25 @@ func (m *Monitor) UpdateSiteNotifyAccounts(ids string) {
 }
 
 func (m *Monitor) loadLastResults() ([]ExtractResult, error) {
-	// 从数据库读取最近一次的提取结果
-	var records []database.UpdateRecord
-	if err := database.GetDB().Where("site_id = ?", m.site.ID).
-		Order("created_at desc").Limit(50).Find(&records).Error; err != nil {
-		return nil, nil
+	// 查询所有 distinct (title, url) 用于去重，比加载全量 Content 更高效
+	type keyPair struct {
+		Title string
+		URL   string
 	}
+	var keys []keyPair
+	database.GetDB().Model(&database.UpdateRecord{}).
+		Select("DISTINCT title, url").
+		Where("site_id = ?", m.site.ID).
+		Find(&keys)
 
-	if len(records) == 0 {
+	if len(keys) == 0 {
 		return nil, nil
 	}
 
 	var results []ExtractResult
-	for _, r := range records {
-		if r.Content != "" {
-			var item ExtractResult
-			if err := json.Unmarshal([]byte(r.Content), &item); err == nil {
-				results = append(results, item)
-			}
+	for _, k := range keys {
+		if k.Title != "" || k.URL != "" {
+			results = append(results, ExtractResult{"title": k.Title, "url": k.URL})
 		}
 	}
 	return results, nil
