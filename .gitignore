@@ -9,9 +9,11 @@ frontend/dist/
 gentry
 gentry.exe
 .claude/
+.reasonix/
 *.db-wal
 *.db-shm*.xlsx
 alterbot
 alterbot.exe
 dist/alterbot-*
+dist/gentry-*
 Gentry
