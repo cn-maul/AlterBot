@@ -1,15 +1,13 @@
 # ================================================================
 # Dockerfile — Gentry 多阶段构建
 #
-# Go 版本注意: go.mod 指定 go 1.25rc2，需要使用 golang:1.25-rc
-# 系列镜像。如果该镜像不可用，请检查 Docker Hub 上的最新标签：
-#   docker pull golang:1.25-rc-alpine
-# 或回退到:
-#   docker build --build-arg GO_VERSION=1.24-alpine .
+# Go 版本注意: go.mod 指定 go 1.26，使用 golang:1.26-alpine 镜像
+# 如需其他版本:
+#   docker build --build-arg GO_VERSION=1.25-alpine .
 # ================================================================
 
 # ---- 构建参数 ----
-ARG GO_VERSION=1.25-alpine
+ARG GO_VERSION=1.26-alpine
 ARG NODE_VERSION=22-alpine
 ARG ALPINE_VERSION=3.21
 

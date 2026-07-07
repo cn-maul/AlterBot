@@ -1,6 +1,6 @@
 module github.com/cn-maul/Gentry
 
-go 1.25rc2
+go 1.26
 
 require (
 	github.com/PuerkitoBio/goquery v1.10.3
