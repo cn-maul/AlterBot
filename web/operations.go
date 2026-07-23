@@ -530,6 +530,37 @@ func (s *WebServer) healthCheck(c *gin.Context) {
 	}))
 }
 
+func (s *WebServer) getStats(c *gin.Context) {
+	db := database.GetDB()
+
+	var totalMonitors int64
+	db.Model(&database.Site{}).Count(&totalMonitors)
+
+	runningMonitors := len(monitor.GetAllMonitors())
+
+	var totalUpdates int64
+	db.Model(&database.UpdateRecord{}).Count(&totalUpdates)
+
+	oneHourAgo := time.Now().Add(-1 * time.Hour)
+	var updatesLastHour int64
+	db.Model(&database.UpdateRecord{}).Where("created_at >= ?", oneHourAgo).Count(&updatesLastHour)
+
+	var unnotifiedUpdates int64
+	db.Model(&database.UpdateRecord{}).Where("notified = ?", false).Count(&unnotifiedUpdates)
+
+	var totalAccounts int64
+	db.Model(&database.NotificationAccount{}).Count(&totalAccounts)
+
+	c.JSON(http.StatusOK, NewSuccessResponse(map[string]interface{}{
+		"total_monitors":     totalMonitors,
+		"running_monitors":   runningMonitors,
+		"total_updates":      totalUpdates,
+		"updates_last_hour":  updatesLastHour,
+		"unnotified_updates": unnotifiedUpdates,
+		"total_accounts":     totalAccounts,
+	}))
+}
+
 // ===== 推送账户 CRUD =====
 
 type scanRuleFieldRequest struct {

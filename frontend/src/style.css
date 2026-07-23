@@ -635,5 +635,4 @@ select.form-input {
   .page-header { flex-direction: column; gap: 0.75rem; }
   .header-actions { width: 100%; }
   .header-actions .btn { flex: 1; justify-content: center; }
-  .main-content { padding: 1rem; }
 }

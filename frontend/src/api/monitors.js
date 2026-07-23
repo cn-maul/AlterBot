@@ -110,6 +110,11 @@ export function healthCheck() {
   return rootClient.get('/health').then(r => r.data)
 }
 
+// 获取统计数据
+export function fetchStats() {
+  return rootClient.get('/stats').then(r => r.data)
+}
+
 // 获取通知设置（仅开关）
 export function fetchNotificationSettings() {
   return rootClient.get('/settings/notifications').then(r => r.data)

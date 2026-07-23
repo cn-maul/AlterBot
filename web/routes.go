@@ -24,6 +24,7 @@ func (s *WebServer) setupRoutes() {
 	authenticated.Use(requireAuth())
 	{
 		authenticated.GET("/health", s.healthCheck)
+		authenticated.GET("/stats", s.getStats)
 		authenticated.GET("/groups", s.listGroups)
 		authenticated.GET("/settings/notifications", s.getNotificationSettings)
 		authenticated.PUT("/settings/notifications", s.updateNotificationSettings)
