@@ -1,5 +1,6 @@
 <template>
   <div class="layout">
+    <!-- ═══ Left Sidebar ═══ -->
     <aside class="sidebar-left">
       <div class="sidebar-brand">
         <router-link to="/" class="brand-link">
@@ -42,38 +43,74 @@
       </div>
     </aside>
 
+    <!-- ═══ Main Content ═══ -->
     <main class="main-content">
       <slot />
     </main>
 
+    <!-- ═══ Right Sidebar: Stats ═══ -->
     <aside class="sidebar-right">
-      <div class="stats-header">
-        <h3>系统概览</h3>
-      </div>
-      <div class="stats-list">
-        <div class="stat-item">
-          <div class="stat-value">{{ stats.total_monitors }}</div>
-          <div class="stat-label">监控器总数</div>
+      <div class="stats-panel">
+        <div class="panel-header">
+          <h3>系统概览</h3>
+          <span class="status-dot" :class="statsOk ? 'dot-ok' : 'dot-err'" :title="statsOk ? '正常运行' : '连接异常'" />
         </div>
-        <div class="stat-item">
-          <div class="stat-value stat-green">{{ stats.running_monitors }}</div>
-          <div class="stat-label">运行中</div>
-        </div>
-        <div class="stat-item">
-          <div class="stat-value">{{ stats.total_updates }}</div>
-          <div class="stat-label">变更记录</div>
-        </div>
-        <div class="stat-item">
-          <div class="stat-value stat-blue">{{ stats.updates_last_hour }}</div>
-          <div class="stat-label">近1小时更新</div>
-        </div>
-        <div class="stat-item">
-          <div class="stat-value stat-orange">{{ stats.unnotified_updates }}</div>
-          <div class="stat-label">待推送</div>
-        </div>
-        <div class="stat-item">
-          <div class="stat-value">{{ stats.total_accounts }}</div>
-          <div class="stat-label">推送账户</div>
+
+        <template v-if="statsLoading && stats.total_monitors === 0">
+          <div class="skel" /><div class="skel skel-sm" /><div class="skel-row"><div class="skel" /><div class="skel" /></div>
+        </template>
+        <template v-else-if="statsError">
+          <p class="stats-error">暂时无法读取统计</p>
+        </template>
+        <template v-else>
+          <!-- System Status -->
+          <div class="stat-card">
+            <div class="stat-hero">
+              <span class="stat-hero-num">{{ stats.running_monitors }}</span>
+              <span class="stat-hero-sep">/</span>
+              <span class="stat-hero-total">{{ stats.total_monitors }}</span>
+            </div>
+            <p class="stat-hero-label">监控器运行中</p>
+            <div class="progress-track">
+              <div class="progress-fill" :style="{ width: monitorPercent + '%' }" />
+            </div>
+          </div>
+
+          <!-- Recent Activity -->
+          <div class="stat-section">
+            <p class="section-title">近期活动</p>
+            <div class="stat-grid">
+              <div class="grid-cell">
+                <span class="grid-num blue">{{ stats.updates_last_hour }}</span>
+                <span class="grid-label">近1小时更新</span>
+              </div>
+              <div class="grid-cell">
+                <span class="grid-num" :class="stats.unnotified_updates > 0 ? 'orange' : ''">{{ stats.unnotified_updates }}</span>
+                <span class="grid-label">待推送</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Cumulative -->
+          <div class="stat-section">
+            <p class="section-title">累计数据</p>
+            <div class="stat-row">
+              <span class="row-label">今日已推送</span>
+              <span class="row-value green">{{ stats.pushed_today }}</span>
+            </div>
+            <div class="stat-row">
+              <span class="row-label">变更记录</span>
+              <span class="row-value">{{ formatNum(stats.total_updates) }}</span>
+            </div>
+            <div class="stat-row">
+              <span class="row-label">推送账户</span>
+              <span class="row-value">{{ stats.total_accounts }}</span>
+            </div>
+          </div>
+        </template>
+
+        <div class="panel-footer">
+          <span class="updated-text">{{ lastUpdatedText }}</span>
         </div>
       </div>
     </aside>
@@ -81,21 +118,47 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { fetchStats } from '../api/monitors'
 
 const STORAGE_KEY = 'gentry_theme'
 const isDark = ref(false)
+const statsLoading = ref(true)
+const statsError = ref(false)
+const statsOk = ref(true)
+const lastUpdated = ref(null)
+
 const stats = reactive({
   total_monitors: 0,
   running_monitors: 0,
   total_updates: 0,
   updates_last_hour: 0,
   unnotified_updates: 0,
+  pushed_today: 0,
   total_accounts: 0,
 })
 
+const monitorPercent = computed(() => {
+  if (!stats.total_monitors) return 0
+  return Math.round((stats.running_monitors / stats.total_monitors) * 100)
+})
+
+const lastUpdatedText = computed(() => {
+  if (!lastUpdated.value) return ''
+  const diff = Math.floor((Date.now() - lastUpdated.value) / 1000)
+  if (diff < 10) return '刚刚更新'
+  if (diff < 60) return `${diff}秒前更新`
+  return `${Math.floor(diff / 60)}分钟前更新`
+})
+
 let statsTimer = null
+let tickTimer = null
+
+function formatNum(n) {
+  if (n >= 10000) return (n / 10000).toFixed(1) + '万'
+  if (n >= 1000) return n.toLocaleString('zh-CN')
+  return n
+}
 
 function applyTheme(dark) {
   document.documentElement.classList.toggle('dark', dark)
@@ -112,8 +175,17 @@ async function loadStats() {
     const res = await fetchStats()
     if (res.code === 0 && res.data) {
       Object.assign(stats, res.data)
+      statsOk.value = true
+      lastUpdated.value = Date.now()
+    } else {
+      statsOk.value = false
     }
-  } catch (_) {}
+  } catch (_) {
+    statsOk.value = false
+    if (!lastUpdated.value) statsError.value = true
+  } finally {
+    statsLoading.value = false
+  }
 }
 
 onMounted(() => {
@@ -121,24 +193,28 @@ onMounted(() => {
   applyTheme(saved === 'dark')
   loadStats()
   statsTimer = setInterval(loadStats, 15000)
+  tickTimer = setInterval(() => { lastUpdated.value = lastUpdated.value }, 10000)
 })
 
 onUnmounted(() => {
   if (statsTimer) clearInterval(statsTimer)
+  if (tickTimer) clearInterval(tickTimer)
 })
 </script>
 
 <style scoped>
+/* ═══ Layout ═══ */
 .layout {
   display: flex;
   min-height: 100vh;
-  background: var(--bg-base);
+  background: var(--bg-surface);
 }
 
+/* ═══ Left Sidebar ═══ */
 .sidebar-left {
   width: 200px;
   min-width: 200px;
-  background: var(--bg-surface);
+  background: var(--bg-base);
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
@@ -162,16 +238,8 @@ onUnmounted(() => {
   color: var(--text);
 }
 
-.brand-icon {
-  color: var(--green);
-  display: flex;
-}
-
-.brand-text {
-  font-size: 1rem;
-  font-weight: 700;
-  letter-spacing: -0.3px;
-}
+.brand-icon { color: var(--green); display: flex; }
+.brand-text { font-size: 1rem; font-weight: 700; letter-spacing: -0.3px; }
 
 .sidebar-nav {
   flex: 1;
@@ -191,7 +259,7 @@ onUnmounted(() => {
   text-decoration: none;
   font-size: 0.8125rem;
   font-weight: 600;
-  transition: var(--transition);
+  transition: color 0.2s ease, background-color 0.2s ease;
   border: none;
   background: none;
   cursor: pointer;
@@ -207,44 +275,36 @@ onUnmounted(() => {
 .nav-item.active {
   color: var(--text);
   background: var(--bg-elevated);
+  box-shadow: inset 3px 0 0 var(--green);
+  border-radius: 0 var(--radius) var(--radius) 0;
 }
 
-.nav-item svg {
-  flex-shrink: 0;
-  opacity: 0.7;
-}
-
-.nav-item.active svg {
-  opacity: 1;
-}
+.nav-item svg { flex-shrink: 0; opacity: 0.7; }
+.nav-item.active svg { opacity: 1; }
 
 .sidebar-footer {
   padding: 0.5rem;
   border-top: 1px solid var(--border-light);
 }
 
-.theme-btn {
-  font-size: 0.75rem;
-  color: var(--text-muted);
-}
+.theme-btn { font-size: 0.75rem; color: var(--text-muted); }
+.theme-btn:hover { color: var(--text-secondary); }
 
-.theme-btn:hover {
-  color: var(--text-secondary);
-}
-
+/* ═══ Main Content ═══ */
 .main-content {
   flex: 1;
   margin-left: 200px;
-  margin-right: 220px;
+  margin-right: 260px;
   padding: 2rem;
   min-width: 0;
+  max-width: calc(1120px + 4rem);
+  background: var(--bg-base);
 }
 
+/* ═══ Right Sidebar ═══ */
 .sidebar-right {
-  width: 220px;
-  min-width: 220px;
-  background: var(--bg-surface);
-  border-left: 1px solid var(--border);
+  width: 260px;
+  min-width: 260px;
   position: fixed;
   top: 0;
   right: 0;
@@ -253,53 +313,200 @@ onUnmounted(() => {
   padding: 1.25rem 1rem;
 }
 
-.stats-header h3 {
+/* ═══ Stats Panel ═══ */
+.stats-panel {
+  background: var(--bg-base);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-lg);
+  padding: 1rem;
+  position: sticky;
+  top: 1rem;
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1rem;
+}
+
+.panel-header h3 {
   font-size: 0.6875rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 1.2px;
   color: var(--text-muted);
-  margin-bottom: 1rem;
 }
 
-.stats-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
+.status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
 }
+.dot-ok { background: var(--green); box-shadow: 0 0 6px rgba(29, 185, 84, 0.4); }
+.dot-err { background: var(--error); box-shadow: 0 0 6px rgba(211, 47, 47, 0.4); }
 
-.stat-item {
-  padding: 0.65rem 0.75rem;
+/* Skeleton */
+.skel {
+  height: 2rem;
+  background: var(--bg-elevated);
   border-radius: var(--radius);
-  transition: var(--transition);
+  margin-bottom: 0.5rem;
+  animation: skel-pulse 1.2s ease-in-out infinite;
+}
+.skel-sm { height: 0.75rem; width: 60%; }
+.skel-row { display: flex; gap: 0.5rem; }
+.skel-row .skel { flex: 1; height: 3rem; }
+@keyframes skel-pulse { 0%,100% { opacity: 0.5; } 50% { opacity: 1; } }
+
+.stats-error {
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+  text-align: center;
+  padding: 1.5rem 0;
 }
 
-.stat-item:hover {
-  background: var(--bg-hover);
+/* Hero: running ratio */
+.stat-card {
+  margin-bottom: 0.75rem;
 }
 
-.stat-value {
-  font-size: 1.5rem;
-  font-weight: 700;
+.stat-hero {
+  display: flex;
+  align-items: baseline;
+  gap: 0.15rem;
+}
+
+.stat-hero-num {
+  font-size: 2rem;
+  font-weight: 800;
   color: var(--text);
-  line-height: 1.2;
+  line-height: 1;
   font-variant-numeric: tabular-nums;
 }
 
-.stat-green { color: var(--green); }
-.stat-blue { color: #1976d2; }
-.stat-orange { color: var(--warning); }
+.stat-hero-sep {
+  font-size: 1.25rem;
+  font-weight: 400;
+  color: var(--text-muted);
+  margin: 0 0.1rem;
+}
 
-.stat-label {
-  font-size: 0.6875rem;
+.stat-hero-total {
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.stat-hero-label {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  margin-top: 0.2rem;
+  font-weight: 500;
+}
+
+.progress-track {
+  height: 4px;
+  background: var(--bg-elevated);
+  border-radius: 2px;
+  margin-top: 0.5rem;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: var(--green);
+  border-radius: 2px;
+  transition: width 0.6s cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+/* Section */
+.stat-section {
+  padding: 0.65rem 0;
+  border-top: 1px solid var(--border-light);
+}
+
+.section-title {
+  font-size: 0.625rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--text-muted);
+  margin-bottom: 0.5rem;
+}
+
+/* 2-col grid */
+.stat-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.35rem;
+}
+
+.grid-cell {
+  display: flex;
+  flex-direction: column;
+  padding: 0.5rem 0.6rem;
+  border-radius: var(--radius);
+  background: var(--bg-surface);
+}
+
+.grid-num {
+  font-size: 1.25rem;
+  font-weight: 700;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+.grid-num.blue { color: #1976d2; }
+.grid-num.orange { color: var(--warning); }
+
+.grid-label {
+  font-size: 0.625rem;
   color: var(--text-muted);
   margin-top: 0.1rem;
   font-weight: 500;
 }
 
+/* Row list */
+.stat-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.3rem 0;
+}
+
+.row-label {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.row-value {
+  font-size: 0.8125rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+.row-value.green { color: var(--green); }
+
+/* Footer */
+.panel-footer {
+  margin-top: 0.75rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--border-light);
+}
+
+.updated-text {
+  font-size: 0.625rem;
+  color: var(--text-muted);
+}
+
+/* ═══ Responsive ═══ */
 @media (max-width: 1100px) {
   .sidebar-right { display: none; }
-  .main-content { margin-right: 0; }
+  .main-content { margin-right: 0; max-width: none; }
 }
 
 @media (max-width: 768px) {
@@ -316,6 +523,7 @@ onUnmounted(() => {
     border-right: none;
     border-top: 1px solid var(--border);
     z-index: 200;
+    background: var(--bg-base);
   }
 
   .sidebar-brand,
@@ -336,13 +544,24 @@ onUnmounted(() => {
     padding: 0.4rem 0.5rem;
     font-size: 0.625rem;
     justify-content: center;
+    box-shadow: none;
+    border-radius: var(--radius);
   }
+
+  .nav-item.active {
+    color: var(--green);
+    background: var(--success-bg);
+    box-shadow: none;
+  }
+
+  .nav-item.active svg { opacity: 1; }
 
   .main-content {
     margin-left: 0;
     margin-right: 0;
     padding: 1rem;
     padding-bottom: 72px;
+    max-width: none;
   }
 }
 </style>

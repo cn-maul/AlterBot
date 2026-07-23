@@ -140,7 +140,7 @@ input, select, textarea { font-family: var(--font); }
   text-transform: uppercase;
   letter-spacing: 1.4px;
   cursor: pointer;
-  transition: var(--transition);
+  transition: background-color 0.2s ease, transform 0.16s ease-out, box-shadow 0.2s ease;
   white-space: nowrap;
   line-height: 1;
   text-decoration: none;
@@ -150,6 +150,10 @@ input, select, textarea { font-family: var(--font); }
 .btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .btn:hover:not(:disabled) { box-shadow: var(--shadow-sm); }
 }
 
 .btn-sm {
@@ -170,7 +174,10 @@ input, select, textarea { font-family: var(--font); }
 
 .btn-primary:hover:not(:disabled) {
   background: var(--green-hover);
-  transform: scale(1.02);
+}
+
+.btn-primary:active:not(:disabled) {
+  transform: scale(0.97);
 }
 
 .btn-ghost {
@@ -184,6 +191,10 @@ input, select, textarea { font-family: var(--font); }
   border-color: var(--text-secondary);
 }
 
+.btn-ghost:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
 .btn-danger {
   background: transparent;
   color: var(--error);
@@ -192,6 +203,10 @@ input, select, textarea { font-family: var(--font); }
 
 .btn-danger:hover:not(:disabled) {
   background: var(--error-bg);
+}
+
+.btn-danger:active:not(:disabled) {
+  transform: scale(0.97);
 }
 
 /* Icon button */

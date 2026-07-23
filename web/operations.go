@@ -548,6 +548,10 @@ func (s *WebServer) getStats(c *gin.Context) {
 	var unnotifiedUpdates int64
 	db.Model(&database.UpdateRecord{}).Where("notified = ?", false).Count(&unnotifiedUpdates)
 
+	todayStart := time.Now().Truncate(24 * time.Hour)
+	var pushedToday int64
+	db.Model(&database.UpdateRecord{}).Where("notified = ? AND notified_at >= ?", true, todayStart).Count(&pushedToday)
+
 	var totalAccounts int64
 	db.Model(&database.NotificationAccount{}).Count(&totalAccounts)
 
@@ -557,6 +561,7 @@ func (s *WebServer) getStats(c *gin.Context) {
 		"total_updates":      totalUpdates,
 		"updates_last_hour":  updatesLastHour,
 		"unnotified_updates": unnotifiedUpdates,
+		"pushed_today":       pushedToday,
 		"total_accounts":     totalAccounts,
 	}))
 }
