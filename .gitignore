@@ -1,0 +1,25 @@
+# Gentry
+examples
+.idea
+*.db
+config.json
+config.private.json
+frontend/node_modules/
+frontend/dist/
+gentry
+gentry.exe
+gentry-windows-amd64.exe
+.claude/
+.reasonix/
+.gomodcache/
+.gocache/
+.pnpm-store/
+.codex-sheet-work/
+*.db-wal
+*.db-shm
+*.xlsx
+alterbot
+alterbot.exe
+dist/alterbot-*
+dist/gentry-*
+Gentry

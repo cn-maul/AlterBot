@@ -1,0 +1,99 @@
+package main
+
+import (
+	"embed"
+	"io/fs"
+	"log"
+	"os"
+	"os/exec"
+	"os/signal"
+	"runtime"
+	"syscall"
+
+	"github.com/cn-maul/Gentry/database"
+	"github.com/cn-maul/Gentry/monitor"
+	"github.com/cn-maul/Gentry/notify"
+	"github.com/cn-maul/Gentry/web"
+)
+
+//go:embed frontend/dist
+var frontendDist embed.FS
+
+func main() {
+	setupConsoleEncoding()
+	log.SetFlags(log.Ldate | log.Ltime | log.Lshortfile)
+	log.Println("=== Gentry 网页变更监控系统 ===")
+
+	// 1. 初始化数据库
+	dbPath := "gentry.db"
+	if err := database.Init(dbPath); err != nil {
+		log.Fatalf("数据库初始化失败: %v", err)
+	}
+
+	// 加载推送开关状态
+	if enabledVal, ok := database.GetSetting("notifications_enabled"); ok && enabledVal == "true" {
+		notify.SetEnabled(true)
+	}
+
+	monitor.InitScanRules(os.Getenv("SCAN_RULES_FILE"))
+
+	// 2. 从数据库加载并启动所有活跃的监控器
+	monitor.StartAllFromDB()
+
+	// 3. 载入前端（如果已构建）
+	var frontendFS fs.FS
+	if _, err := fs.ReadDir(frontendDist, "frontend/dist"); err == nil {
+		sub, err := fs.Sub(frontendDist, "frontend/dist")
+		if err == nil {
+			frontendFS = sub
+			log.Println("[Web] 前端已嵌入，管理界面可用")
+		}
+	} else {
+		log.Println("[Web] 前端未构建，仅 API 模式运行（cd frontend && npm run dev）")
+	}
+
+	// 4. 启动 Web 服务
+	ws := web.NewWebServer(frontendFS)
+	go func() {
+		addr := ":" + getPort()
+		log.Printf("[Web] 服务启动: http://localhost%s", addr)
+		if err := ws.Run(addr); err != nil {
+			log.Fatalf("Web 服务启动失败: %v", err)
+		}
+	}()
+
+	// 5. 等待中断信号
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	sig := <-sigCh
+	log.Printf("收到信号 %v，正在停止所有监控器...", sig)
+
+	monitor.StopAll()
+	log.Println("Gentry 已安全退出")
+}
+
+// getPort 读取 PORT 环境变量，默认 8080
+func getPort() string {
+	if p := os.Getenv("PORT"); p != "" {
+		return p
+	}
+	return "8080"
+}
+
+// setupConsoleEncoding 设置 Windows 控制台为 UTF-8 编码，确保中文正常显示
+func setupConsoleEncoding() {
+	if isWindows() {
+		runCmd("chcp", "65001")
+	}
+}
+
+func isWindows() bool {
+	return runtime.GOOS == "windows"
+}
+
+func runCmd(name string, args ...string) {
+	cmd := exec.Command(name, args...)
+	cmd.Stdout = nil
+	cmd.Stderr = nil
+	_ = cmd.Run()
+}

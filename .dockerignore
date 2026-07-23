@@ -1,0 +1,30 @@
+# Git
+.git/
+.gitignore
+
+# Go
+gentry
+gentry-linux-*
+gentry-windows-*
+*.db
+*.db-wal
+*.db-shm
+
+# Frontend local dev
+frontend/node_modules/
+frontend/dist/
+
+# Config (sensitive)
+config.json
+config.private.json
+
+# IDE
+.idea/
+.vscode/
+
+# Claude
+.claude/
+
+# Other
+examples/
+*.xlsx
