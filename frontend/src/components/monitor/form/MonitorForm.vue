@@ -10,10 +10,6 @@
       :monitorType="form.monitorType"
     />
 
-    <template v-if="form.monitorType === 'presence'">
-      <PresenceRuleEditor />
-    </template>
-
     <template v-if="form.monitorType === 'field_transition'">
       <NumericTransitionRuleEditor :form="form" @update:form="updateForm" />
     </template>
@@ -63,7 +59,6 @@
 import MonitorTypeSelector from './MonitorTypeSelector.vue'
 import BasicMonitorForm from './BasicMonitorForm.vue'
 import ExtractionEditor from './ExtractionEditor.vue'
-import PresenceRuleEditor from './PresenceRuleEditor.vue'
 import NumericTransitionRuleEditor from './NumericTransitionRuleEditor.vue'
 import NotificationEditor from './NotificationEditor.vue'
 import MonitorValidationPanel from './MonitorValidationPanel.vue'

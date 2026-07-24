@@ -1,394 +1,426 @@
 <template>
-  <div class="scan-rule-page">
-    <div class="page-header">
+  <div class="page scan-rules-page">
+    <div v-if="successMsg" class="toast toast-success">{{ successMsg }}</div>
+    <div v-if="pageErrorMsg" class="toast toast-error">{{ pageErrorMsg }}</div>
+
+    <header class="page-header">
       <div>
         <h1>扫描规则</h1>
-        <p class="page-desc">管理可复用的扫描规则模板，优先于内置规则参与扫描。</p>
+        <p>预扫描并保存可复用的网页提取规则</p>
       </div>
       <div class="header-actions">
-        <button class="btn btn-primary" @click="openCreate">新增规则</button>
+        <input ref="fileInput" class="file-input" type="file" accept="application/json,.json" @change="handleImportFile" />
+        <button class="btn btn-ghost btn-sm" :disabled="importing" @click="fileInput?.click()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+          {{ importing ? '导入中...' : '导入' }}
+        </button>
+        <button class="btn btn-ghost btn-sm" :disabled="exporting || rules.length === 0" @click="handleExport">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 21V9"/><path d="m17 14-5-5-5 5"/><path d="M5 3h14"/></svg>
+          {{ exporting ? '导出中...' : '导出' }}
+        </button>
       </div>
-    </div>
+    </header>
 
-    <div class="toast toast-success" v-if="successMsg">{{ successMsg }}</div>
-    <div class="toast toast-warning" v-if="pageErrorMsg">{{ pageErrorMsg }}</div>
-
-    <div class="loading" v-if="loading">
-      <div class="spinner" />
-      <p>加载扫描规则...</p>
-    </div>
-
-    <template v-else-if="rules.length === 0">
-      <div class="empty">
-        <div class="empty-icon">🧭</div>
-        <p>还没有扫描规则</p>
-        <p style="color: var(--text-muted); font-size: 0.8125rem; margin-top: 0.25rem;">
-          创建规则后，扫描时会优先尝试命中这些模板。
-        </p>
-        <button class="btn btn-primary btn-sm" style="margin-top: 1rem;" @click="openCreate">新增规则</button>
+    <section class="builder-section" aria-labelledby="quick-rule-title">
+      <div class="section-title-row">
+        <h2 id="quick-rule-title">快速保存</h2>
+        <span v-if="scanResult" class="result-count">{{ candidates.length }} 个候选</span>
       </div>
-    </template>
 
-    <template v-else>
-      <div class="settings-section">
-        <div class="section-header">
-          <h2>规则模板（{{ rules.length }}）</h2>
-          <p class="section-desc">按优先级排序，启用的规则会在扫描时优先参与候选生成。</p>
+      <div class="scan-form">
+        <div class="form-group url-field">
+          <label for="rule-url">URL</label>
+          <input id="rule-url" v-model="url" class="form-input" placeholder="https://example.com/announcements/" @keyup.enter="handleScan" />
         </div>
+        <div class="form-group keyword-field">
+          <label for="rule-keywords">关键词</label>
+          <input id="rule-keywords" v-model="keywords" class="form-input" placeholder="公告, 招聘, 公示" @keyup.enter="handleScan" />
+        </div>
+        <button class="btn btn-primary scan-button" :disabled="!url.trim() || scanning" @click="handleScan">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+          {{ scanning ? '扫描中...' : '预扫描' }}
+        </button>
+      </div>
 
-        <div v-for="rule in rules" :key="rule.id" class="rule-card">
-          <div class="rule-header">
-            <div class="rule-info">
-              <span class="rule-name">{{ rule.name }}</span>
-              <span class="rule-badge">{{ rule.enabled ? '已启用' : '已禁用' }}</span>
-              <span class="rule-priority">优先级 {{ rule.priority }}</span>
-            </div>
-            <div class="rule-actions">
-              <button class="icon-btn" title="测试" @click="openTest(rule)">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-              </button>
-              <button class="icon-btn" title="编辑" @click="openEdit(rule)">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-              </button>
-              <button class="icon-btn icon-btn-danger" title="删除" @click="confirmDelete(rule)">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-              </button>
-            </div>
-          </div>
+      <div v-if="scanError" class="inline-error">{{ scanError }}</div>
+      <div v-if="scanning" class="scan-loading"><div class="spinner" /><span>正在扫描网页</span></div>
 
-          <div class="rule-meta">
-            <span>URL 包含：<code>{{ rule.url_contains }}</code></span>
-            <span>Container：<code>{{ rule.container }}</code></span>
-            <span>Item：<code>{{ rule.item }}</code></span>
-          </div>
+      <div v-else-if="candidates.length" class="candidate-list">
+        <button
+          v-for="(candidate, index) in candidates"
+          :key="candidateKey(candidate, index)"
+          type="button"
+          class="candidate-row"
+          :class="{ selected: selectedIndex === index }"
+          @click="selectedIndex = index"
+        >
+          <span class="choice-mark" aria-hidden="true">
+            <svg v-if="selectedIndex === index" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="m5 12 4 4L19 6"/></svg>
+          </span>
+          <span class="candidate-content">
+            <span class="candidate-heading">
+              <strong>候选 {{ index + 1 }}</strong>
+              <span>{{ candidate.item_count }} 条</span>
+              <span v-if="candidate.keyword_hits">关键词命中 {{ candidate.keyword_hits }}</span>
+              <span class="candidate-strategy" :class="strategyClass(candidate.strategy)" v-if="candidate.strategy">{{ strategyLabel(candidate.strategy) }}</span>
+            </span>
+            <span class="sample-list">
+              <span v-for="(item, itemIndex) in (candidate.sample_items || []).slice(0, 4)" :key="itemIndex" class="sample-line">
+                <span class="sample-title">{{ item.title || item.url || '未命名内容' }}</span>
+                <span v-if="item.date" class="sample-date">{{ item.date }}</span>
+              </span>
+            </span>
+            <span class="selector-line">
+              <code>{{ candidate.config?.container }}</code>
+              <span>/</span>
+              <code>{{ candidate.config?.item }}</code>
+            </span>
+          </span>
+        </button>
+      </div>
 
-          <div class="rule-desc" v-if="rule.description">{{ rule.description }}</div>
+      <div v-else-if="scanned" class="empty-result">没有找到可保存的内容区域</div>
 
-          <div class="rule-fields" v-if="rule.fields && rule.fields.length">
-            <div class="rule-field" v-for="field in rule.fields" :key="field.name + ':' + field.selector">
-              <span class="field-name">{{ field.name }}</span>
-              <code>{{ field.selector || '(当前项文本)' }}</code>
-              <span class="field-type">{{ field.type }}</span>
-            </div>
+      <div v-if="selectedCandidate" class="save-panel">
+        <div class="form-group name-field">
+          <label for="rule-name">规则名称</label>
+          <input id="rule-name" v-model="ruleName" class="form-input" placeholder="例如：殷都区招聘公告列表" @keyup.enter="handleSave" />
+        </div>
+        <div class="scope-field">
+          <span class="field-label">适用范围</span>
+          <div class="scope-control">
+            <button type="button" :class="{ active: scopeType === 'exact' }" @click="scopeType = 'exact'">当前页面</button>
+            <button type="button" :disabled="!routeScopeAvailable" :class="{ active: scopeType === 'route' }" title="匹配当前路径及其子路径" @click="scopeType = 'route'">当前路由</button>
+            <button type="button" :class="{ active: scopeType === 'global' }" title="跨网站按相同页面结构匹配" @click="scopeType = 'global'">通用结构</button>
           </div>
         </div>
+        <div class="scope-summary">{{ scopeSummary }}</div>
+        <button class="btn btn-primary save-button" :disabled="saving || !ruleName.trim()" @click="handleSave">
+          {{ saving ? '保存中...' : '保存规则' }}
+        </button>
       </div>
-    </template>
+    </section>
 
-    <div class="modal-overlay" v-if="showModal" @click.self="showModal = false">
-      <div class="modal-container modal-lg">
-        <div class="modal-header">
-          <h2>{{ editingRule ? '编辑扫描规则' : '新增扫描规则' }}</h2>
-          <button class="modal-close" @click="showModal = false">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+    <section class="library-section" aria-labelledby="rule-library-title">
+      <div class="section-title-row library-title">
+        <h2 id="rule-library-title">已保存规则</h2>
+        <span>{{ rules.length }}</span>
+      </div>
+
+      <div v-if="loading" class="list-state">正在加载规则</div>
+      <div v-else-if="rules.length === 0" class="list-state">暂无已保存规则</div>
+      <div v-else class="rule-list">
+        <article v-for="rule in rules" :key="rule.id" class="rule-row">
+          <div class="rule-main">
+            <div class="rule-heading">
+              <strong>{{ rule.name }}</strong>
+              <span class="scope-badge" :class="`scope-${rule.scope_type || 'legacy'}`">{{ scopeName(rule) }}</span>
+              <span v-if="!rule.enabled" class="disabled-badge">已禁用</span>
+            </div>
+            <div class="rule-target">{{ scopeTarget(rule) }}</div>
+            <div class="rule-structure">
+              <code>{{ rule.container }}</code>
+              <span>/</span>
+              <code>{{ rule.item }}</code>
+              <span class="field-count">{{ (rule.fields || []).length }} 个字段</span>
+            </div>
+          </div>
+          <button class="icon-button danger" title="删除规则" @click="handleDelete(rule)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="m19 6-1 14H6L5 6"/><path d="M10 11v5M14 11v5"/></svg>
           </button>
-        </div>
-        <div class="modal-body">
-          <div class="form-group">
-            <label>规则名称</label>
-            <input v-model="form.name" class="form-input" placeholder="如 澎湃快讯时间线" />
-          </div>
-          <div class="form-group">
-            <label>URL 包含</label>
-            <input v-model="form.url_contains" class="form-input" placeholder="如 thepaper.cn/expressNews" />
-          </div>
-          <div class="form-group">
-            <label>容器选择器</label>
-            <input v-model="form.container" class="form-input" placeholder="如 ul.ant-timeline" />
-          </div>
-          <div class="form-group">
-            <label>列表项选择器</label>
-            <input v-model="form.item" class="form-input" placeholder="如 li.ant-timeline-item" />
-          </div>
-          <div class="form-group inline-grid">
-            <div>
-              <label>优先级</label>
-              <input v-model.number="form.priority" class="form-input" type="number" min="1" placeholder="50" />
-            </div>
-            <div>
-              <label>启用状态</label>
-              <label class="checkbox-label"><input v-model="form.enabled" type="checkbox" /> 启用此规则</label>
-            </div>
-          </div>
-          <div class="form-group">
-            <label>说明（可选）</label>
-            <textarea v-model="form.description" class="form-input" rows="3" placeholder="如：适用于澎湃快讯时间线结构" />
-          </div>
-
-          <FieldEditor v-model="form.fields" />
-
-          <div class="form-error" v-if="modalError">{{ modalError }}</div>
-        </div>
-        <div class="modal-footer">
-          <button class="btn btn-ghost" @click="showModal = false">取消</button>
-          <button class="btn btn-primary" :disabled="modalSaving" @click="handleSaveRule">{{ modalSaving ? '保存中...' : '保存' }}</button>
-        </div>
+        </article>
       </div>
-    </div>
-
-    <div class="modal-overlay" v-if="testTarget" @click.self="closeTest()">
-      <div class="modal-container modal-lg">
-        <div class="modal-header">
-          <h2>测试扫描规则</h2>
-          <button class="modal-close" @click="closeTest()">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-          </button>
-        </div>
-        <div class="modal-body">
-          <div class="form-group">
-            <label>测试 URL</label>
-            <input v-model="testForm.url" class="form-input" placeholder="https://example.com/announce/" />
-          </div>
-          <div class="form-group">
-            <label>关键词（多个用逗号隔开）</label>
-            <input v-model="testForm.keywords" class="form-input" placeholder="面试,录用,公告" />
-          </div>
-          <div class="form-actions" style="justify-content: flex-start; margin-top: 0.5rem;">
-            <button class="btn btn-primary" :disabled="testingRule" @click="handleTestRule">{{ testingRule ? '测试中...' : '开始测试' }}</button>
-          </div>
-
-          <div class="form-error" v-if="testError" style="margin-top: 0.75rem;">{{ testError }}</div>
-
-          <div class="preview-results" v-if="testResult && testResult.containers && testResult.containers.length > 0" style="margin-top: 1rem;">
-            <div v-for="(container, ci) in testResult.containers" :key="ci" class="preview-card">
-              <div class="preview-card-header">
-                <span class="candidate-badge">{{ container.strategy || 'candidate' }}</span>
-                <span class="candidate-count">{{ container.item_count }} 条</span>
-              </div>
-              <div class="candidate-selector"><code>{{ container.config?.container }}</code> / <code>{{ container.config?.item }}</code></div>
-              <div class="sample-list">
-                <div v-for="(item, ii) in container.sample_items" :key="ii" class="sample-item">
-                  <span class="sample-title">{{ item.title }}</span>
-                  <span class="sample-meta" v-if="item.date">{{ item.date }}</span>
-                </div>
-              </div>
-            </div>
-          </div>
-          <div class="empty" v-else-if="testRan" style="margin-top: 1rem;">
-            <p>未匹配到结果</p>
-          </div>
-        </div>
-        <div class="modal-footer">
-          <button class="btn btn-ghost" @click="closeTest()">关闭</button>
-        </div>
-      </div>
-    </div>
-
-    <div class="modal-overlay" v-if="deleteTarget" @click.self="deleteTarget = null">
-      <div class="modal-container" style="max-width: 400px;">
-        <div class="modal-header">
-          <h2>确认删除</h2>
-          <button class="modal-close" @click="deleteTarget = null">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-          </button>
-        </div>
-        <div class="modal-body">
-          <p>确定删除扫描规则「{{ deleteTarget.name }}」吗？</p>
-        </div>
-        <div class="modal-footer">
-          <button class="btn btn-ghost" @click="deleteTarget = null">取消</button>
-          <button class="btn btn-danger" @click="handleDeleteRule">确认删除</button>
-        </div>
-      </div>
-    </div>
+    </section>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
-import { fetchScanRules, createScanRule, updateScanRule, deleteScanRule, testScanRule } from '../api/monitors'
-import FieldEditor from '../components/FieldEditor.vue'
+import { computed, onMounted, ref, watch } from 'vue'
+import { deleteScanRule, exportScanRules, fetchScanRules, importScanRules, previewScan, quickCreateScanRule } from '../api/monitors'
 import { useToastMessages } from '../composables/useToastMessages'
 
 const { successMsg, pageErrorMsg, showSuccess, showError } = useToastMessages()
 
 const loading = ref(true)
 const rules = ref([])
-const showModal = ref(false)
-const editingRule = ref(null)
-const deleteTarget = ref(null)
-const modalSaving = ref(false)
-const modalError = ref('')
+const url = ref('')
+const keywords = ref('')
+const scanning = ref(false)
+const scanned = ref(false)
+const scanError = ref('')
+const scanResult = ref(null)
+const selectedIndex = ref(null)
+const ruleName = ref('')
+const scopeType = ref('exact')
+const saving = ref(false)
+const importing = ref(false)
+const exporting = ref(false)
+const fileInput = ref(null)
 
-// 测试弹窗
-const testTarget = ref(null)
-const testForm = ref({ url: '', keywords: '' })
-const testingRule = ref(false)
-const testError = ref('')
-const testResult = ref(null)
-const testRan = ref(false)
-
-const form = ref({
-  name: '',
-  url_contains: '',
-  container: '',
-  item: '',
-  priority: 50,
-  enabled: true,
-  description: '',
-  fields: [{ name: 'title', selector: '', type: 'text', attr: '', transform: '' }],
+const candidates = computed(() => scanResult.value?.containers || [])
+const selectedCandidate = computed(() => selectedIndex.value === null ? null : candidates.value[selectedIndex.value])
+const parsedURL = computed(() => {
+  try { return new URL(url.value.trim()) } catch { return null }
+})
+const routeScopeAvailable = computed(() => Boolean(parsedURL.value && (parsedURL.value.pathname !== '/' || parsedURL.value.search)))
+const scopeSummary = computed(() => {
+  if (scopeType.value === 'global') return '所有网站中结构相同的页面'
+  if (!parsedURL.value) return ''
+  if (scopeType.value === 'route') return `${parsedURL.value.host}${parsedURL.value.pathname}${parsedURL.value.search}`
+  return parsedURL.value.href
 })
 
-function openTest(rule) {
-  testTarget.value = rule
-  testForm.value = { url: '', keywords: '' }
-  testError.value = ''
-  testResult.value = null
-  testRan.value = false
-}
+watch([url, keywords], () => {
+  scanResult.value = null
+  selectedIndex.value = null
+  scanned.value = false
+  scanError.value = ''
+  ruleName.value = ''
+  scopeType.value = 'exact'
+})
 
-function closeTest() {
-  testTarget.value = null
-  testResult.value = null
-  testRan.value = false
-}
+onMounted(loadRules)
 
-async function handleTestRule() {
-  if (!testForm.value.url.trim()) { testError.value = '请输入测试 URL'; return }
-  // 关键词不再强制要求，允许无关键词进行扫描规则模板测试
-  testingRule.value = true
-  testError.value = ''
-  testResult.value = null
-  testRan.value = false
-  try {
-    const res = await testScanRule(testTarget.value.id, { url: testForm.value.url.trim() })
-    if (res.code === 0) {
-      testResult.value = res.data
-    } else {
-      testError.value = res.message || '扫描失败'
-    }
-  } catch (e) {
-    testError.value = '测试失败: ' + (e.response?.data?.message || e.message)
-  } finally {
-    testingRule.value = false
-    testRan.value = true
-  }
-}
-
-function resetForm() {
-  form.value = {
-    name: '',
-    url_contains: '',
-    container: '',
-    item: '',
-    priority: 50,
-    enabled: true,
-    description: '',
-    fields: [{ name: 'title', selector: '', type: 'text', attr: '', transform: '' }],
-  }
-}
-
-onMounted(loadAll)
-
-async function loadAll() {
+async function loadRules() {
   loading.value = true
   try {
-    const res = await fetchScanRules()
-    if (res.code === 0) rules.value = res.data || []
-  } catch (e) {
-    showError('加载失败: ' + (e.response?.data?.message || e.message))
+    const response = await fetchScanRules()
+    rules.value = response.code === 0 ? (response.data || []) : []
+  } catch (error) {
+    showError('加载规则失败: ' + errorMessage(error))
   } finally {
     loading.value = false
   }
 }
 
-function openCreate() {
-  editingRule.value = null
-  resetForm()
-  modalError.value = ''
-  showModal.value = true
-}
-
-function openEdit(rule) {
-  editingRule.value = rule
-  form.value = {
-    name: rule.name,
-    url_contains: rule.url_contains,
-    container: rule.container,
-    item: rule.item,
-    priority: rule.priority,
-    enabled: rule.enabled,
-    description: rule.description || '',
-    fields: (rule.fields && rule.fields.length > 0)
-      ? rule.fields.map(f => ({ name: f.name || '', selector: f.selector || '', type: f.type || 'text', attr: f.attr || '', transform: f.transform || '' }))
-      : [{ name: 'title', selector: '', type: 'text', attr: '', transform: '' }],
+async function handleScan() {
+  if (!url.value.trim()) return
+  scanning.value = true
+  scanned.value = false
+  scanError.value = ''
+  scanResult.value = null
+  selectedIndex.value = null
+  try {
+    const response = await previewScan({ url: url.value.trim(), keywords: keywords.value.trim() })
+    if (response.code === 0) scanResult.value = response.data
+    else scanError.value = response.message || '扫描失败'
+  } catch (error) {
+    scanError.value = errorMessage(error)
+  } finally {
+    scanning.value = false
+    scanned.value = true
   }
-  modalError.value = ''
-  showModal.value = true
 }
 
-function confirmDelete(rule) {
-  deleteTarget.value = rule
+async function handleSave() {
+  if (!selectedCandidate.value || !ruleName.value.trim()) return
+  saving.value = true
+  try {
+    await quickCreateScanRule({
+      name: ruleName.value.trim(),
+      url: url.value.trim(),
+      keywords: keywords.value.trim(),
+      scope_type: scopeType.value,
+      config: selectedCandidate.value.config,
+    })
+    showSuccess('规则已保存')
+    resetBuilder()
+    await loadRules()
+  } catch (error) {
+    showError('保存规则失败: ' + errorMessage(error))
+  } finally {
+    saving.value = false
+  }
 }
 
-async function handleDeleteRule() {
-  const rule = deleteTarget.value
-  deleteTarget.value = null
+async function handleDelete(rule) {
+  if (!window.confirm(`确定删除规则「${rule.name}」吗？`)) return
   try {
     await deleteScanRule(rule.id)
-    rules.value = rules.value.filter(r => r.id !== rule.id)
-    showSuccess(`「${rule.name}」已删除`)
-  } catch (e) {
-    showError('删除失败: ' + (e.response?.data?.message || e.message))
+    rules.value = rules.value.filter(item => item.id !== rule.id)
+    showSuccess('规则已删除')
+  } catch (error) {
+    showError('删除规则失败: ' + errorMessage(error))
   }
 }
 
-async function handleSaveRule() {
-  if (!form.value.name.trim()) { modalError.value = '请输入规则名称'; return }
-  if (!form.value.url_contains.trim()) { modalError.value = '请输入 URL 包含'; return }
-  if (!form.value.container.trim()) { modalError.value = '请输入容器选择器'; return }
-  if (!form.value.item.trim()) { modalError.value = '请输入列表项选择器'; return }
-  if (!form.value.fields.some(f => f.name.trim() === 'title')) { modalError.value = '至少需要一个 title 字段'; return }
-
-  modalError.value = ''
-  modalSaving.value = true
+async function handleExport() {
+  exporting.value = true
   try {
-    const payload = {
-      name: form.value.name.trim(),
-      url_contains: form.value.url_contains.trim(),
-      container: form.value.container.trim(),
-      item: form.value.item.trim(),
-      priority: form.value.priority || 50,
-      enabled: form.value.enabled,
-      description: form.value.description || '',
-      fields: form.value.fields.filter(f => f.name.trim() && f.type),
-    }
-    if (editingRule.value) {
-      await updateScanRule(editingRule.value.id, payload)
-      showSuccess('规则已更新')
-    } else {
-      await createScanRule(payload)
-      showSuccess('规则已创建')
-    }
-    showModal.value = false
-    await loadAll()
-  } catch (e) {
-    modalError.value = e.response?.data?.message || e.message
+    const response = await exportScanRules()
+    if (response.code !== 0 || !response.data) throw new Error(response.message || '导出失败')
+    const blob = new Blob([JSON.stringify(response.data, null, 2)], { type: 'application/json;charset=utf-8' })
+    const link = document.createElement('a')
+    link.href = URL.createObjectURL(blob)
+    link.download = `gentry-scan-rules-${new Date().toISOString().slice(0, 10)}.json`
+    link.click()
+    URL.revokeObjectURL(link.href)
+    showSuccess(`已导出 ${rules.value.length} 条规则`)
+  } catch (error) {
+    showError('导出规则失败: ' + errorMessage(error))
   } finally {
-    modalSaving.value = false
+    exporting.value = false
   }
+}
+
+async function handleImportFile(event) {
+  const file = event.target.files?.[0]
+  if (!file) return
+  importing.value = true
+  try {
+    const document = JSON.parse(await file.text())
+    const response = await importScanRules(document)
+    if (response.code !== 0) throw new Error(response.message || '导入失败')
+    const imported = response.data?.imported || 0
+    const skipped = response.data?.skipped || 0
+    showSuccess(`已导入 ${imported} 条${skipped ? `，跳过 ${skipped} 条同名规则` : ''}`)
+    await loadRules()
+  } catch (error) {
+    showError('导入规则失败: ' + errorMessage(error))
+  } finally {
+    importing.value = false
+    event.target.value = ''
+  }
+}
+
+function resetBuilder() {
+  url.value = ''
+  keywords.value = ''
+  scanResult.value = null
+  selectedIndex.value = null
+  scanned.value = false
+  ruleName.value = ''
+  scopeType.value = 'exact'
+}
+
+function candidateKey(candidate, index) {
+  return `${candidate.config?.container || ''}:${candidate.config?.item || ''}:${index}`
+}
+
+function scopeName(rule) {
+  if (rule.scope_type === 'exact') return '页面'
+  if (rule.scope_type === 'route') return '路由'
+  if (rule.scope_type === 'global') return '通用'
+  return '旧版'
+}
+
+function scopeTarget(rule) {
+  if (rule.scope_type === 'global') return '所有网站中结构相同的页面'
+  return rule.source_url || `URL 包含 ${rule.url_contains}`
+}
+
+function strategyLabel(strategy) {
+  if (!strategy) return ''
+  if (strategy.startsWith('template_')) return `规则「${strategy.slice(9)}」`
+  const labels = {
+    keyword_ancestor: '关键词定位',
+    repeated_list: '重复列表',
+    link_cluster: '链接簇',
+    table_rows: '表格检测',
+  }
+  return labels[strategy] || strategy
+}
+
+function strategyClass(strategy) {
+  return strategy?.startsWith('template_') ? 'strategy-rule' : 'strategy-heuristic'
+}
+
+function errorMessage(error) {
+  return error.response?.data?.message || error.message || '操作失败'
 }
 </script>
 
 <style scoped>
-.page-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 1.5rem; }
-.page-header h1 { font-size: 1.5rem; font-weight: 700; color: var(--text); margin-top: 0.5rem; }
-.rule-card { background: var(--bg-card); border-radius: var(--radius-lg); padding: 1rem; margin-bottom: 0.75rem; }
-.rule-header { display: flex; justify-content: space-between; align-items: center; gap: 1rem; }
-.rule-info { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
-.rule-name { font-weight: 700; font-size: 0.9375rem; color: var(--text); }
-.rule-badge, .rule-priority { font-size: 0.6875rem; font-weight: 700; padding: 0.15rem 0.5rem; border-radius: var(--radius-pill); }
-.rule-badge { color: var(--text); background: var(--green); }
-.rule-priority { color: var(--text-secondary); background: var(--bg-elevated); }
-.rule-actions { display: flex; gap: 0.25rem; }
-.rule-meta { display: flex; flex-direction: column; gap: 0.25rem; margin-top: 0.5rem; font-size: 0.8125rem; color: var(--text-secondary); }
-.rule-desc { margin-top: 0.5rem; color: var(--text-secondary); font-size: 0.875rem; }
-.rule-fields { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.75rem; }
-.rule-field { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.3rem 0.55rem; border-radius: var(--radius-pill); background: var(--bg-elevated); font-size: 0.75rem; }
-.field-name { font-weight: 700; color: var(--text); }
-.field-type { color: var(--text-muted); }
-.inline-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
-.modal-lg { max-width: 860px; }
-.checkbox-label { display: inline-flex; align-items: center; gap: 0.5rem; margin-top: 0.5rem; }
-@media (max-width: 720px) { .inline-grid { grid-template-columns: 1fr; } }
+.scan-rules-page { max-width: 1120px; }
+.page-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; margin-bottom: 1.75rem; }
+.page-header h1 { margin: 0; color: var(--text); font-size: 1.5rem; font-weight: 700; }
+.page-header p { margin-top: 0.3rem; color: var(--text-secondary); font-size: 0.8125rem; }
+.header-actions { display: flex; gap: 0.5rem; flex-shrink: 0; }
+.header-actions svg, .scan-button svg { width: 16px; height: 16px; }
+.file-input { display: none; }
+
+.builder-section, .library-section { padding: 0 0 1.75rem; }
+.builder-section { border-bottom: 1px solid var(--border); }
+.library-section { padding-top: 1.75rem; }
+.section-title-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 1rem; }
+.section-title-row h2 { margin: 0; color: var(--text); font-size: 1rem; font-weight: 700; }
+.result-count, .library-title > span { color: var(--text-muted); font-size: 0.75rem; }
+
+.scan-form { display: grid; grid-template-columns: minmax(280px, 2fr) minmax(200px, 1fr) auto; align-items: end; gap: 0.75rem; }
+.scan-form .form-group { min-width: 0; margin: 0; }
+.scan-button { height: 38px; padding-inline: 1.2rem; }
+.inline-error { margin-top: 0.75rem; color: var(--error); font-size: 0.8125rem; }
+.scan-loading { display: flex; align-items: center; justify-content: center; gap: 0.75rem; min-height: 120px; color: var(--text-secondary); font-size: 0.8125rem; }
+.scan-loading .spinner { width: 22px; height: 22px; margin: 0; border-width: 2px; }
+.empty-result { margin-top: 1rem; padding: 1.5rem 0; border-top: 1px solid var(--border-light); color: var(--text-secondary); text-align: center; font-size: 0.8125rem; }
+
+.candidate-list { display: grid; gap: 0.6rem; margin-top: 1rem; }
+.candidate-row { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 0.75rem; width: 100%; padding: 0.85rem; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-surface); color: var(--text); text-align: left; cursor: pointer; transition: var(--transition); }
+.candidate-row:hover { border-color: var(--text-muted); background: var(--bg-hover); }
+.candidate-row.selected { border-color: var(--green); box-shadow: 0 0 0 1px var(--green) inset; }
+.choice-mark { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; margin-top: 1px; border: 1px solid var(--border); border-radius: 50%; color: #000; background: var(--bg-elevated); }
+.candidate-row.selected .choice-mark { border-color: var(--green); background: var(--green); }
+.choice-mark svg { width: 13px; height: 13px; }
+.candidate-content { min-width: 0; }
+.candidate-heading { display: flex; align-items: center; gap: 0.65rem; margin-bottom: 0.55rem; font-size: 0.75rem; color: var(--text-secondary); }
+.candidate-heading strong { color: var(--text); font-size: 0.875rem; }
+.candidate-strategy { font-size: 0.6875rem; padding: 0.1rem 0.5rem; border-radius: var(--radius-pill); white-space: nowrap; }
+.candidate-strategy.strategy-rule { color: #fff; background: #e74c3c; font-weight: 700; }
+.candidate-strategy.strategy-heuristic { color: var(--accent); background: var(--bg-elevated); }
+.sample-list { display: grid; gap: 0.2rem; }
+.sample-line { display: flex; justify-content: space-between; gap: 1rem; min-width: 0; padding: 0.28rem 0.5rem; border-radius: 4px; background: var(--bg-elevated); font-size: 0.8125rem; }
+.sample-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sample-date { flex-shrink: 0; color: var(--text-muted); font-size: 0.75rem; }
+.selector-line { display: flex; gap: 0.4rem; min-width: 0; margin-top: 0.55rem; color: var(--text-muted); font-size: 0.6875rem; }
+.selector-line code { overflow: hidden; color: var(--text-secondary); text-overflow: ellipsis; white-space: nowrap; }
+
+.save-panel { display: grid; grid-template-columns: minmax(220px, 1fr) auto minmax(180px, 1fr) auto; align-items: end; gap: 0.75rem; margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border-light); }
+.save-panel .form-group { margin: 0; }
+.field-label { display: block; margin-bottom: 0.35rem; color: var(--text-secondary); font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; }
+.scope-control { display: grid; grid-template-columns: repeat(3, auto); overflow: hidden; border: 1px solid var(--border); border-radius: 6px; }
+.scope-control button { min-height: 38px; padding: 0 0.8rem; border: 0; border-right: 1px solid var(--border); background: var(--bg-elevated); color: var(--text-secondary); cursor: pointer; font-size: 0.75rem; white-space: nowrap; }
+.scope-control button:last-child { border-right: 0; }
+.scope-control button.active { background: var(--green); color: #000; font-weight: 700; }
+.scope-control button:disabled { opacity: 0.4; cursor: not-allowed; }
+.scope-summary { align-self: center; min-width: 0; overflow: hidden; color: var(--text-muted); font-size: 0.75rem; text-overflow: ellipsis; white-space: nowrap; }
+.save-button { height: 38px; }
+
+.rule-list { border-top: 1px solid var(--border); }
+.rule-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 1rem 0; border-bottom: 1px solid var(--border-light); }
+.rule-main { min-width: 0; }
+.rule-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 0.5rem; }
+.rule-heading strong { font-size: 0.875rem; }
+.scope-badge, .disabled-badge { padding: 0.14rem 0.45rem; border-radius: 4px; font-size: 0.6875rem; font-weight: 700; }
+.scope-badge { background: var(--bg-elevated); color: var(--text-secondary); }
+.scope-global { color: var(--green); }
+.disabled-badge { color: var(--warning); background: var(--warning-bg); }
+.rule-target { margin-top: 0.35rem; overflow: hidden; color: var(--text-secondary); font-size: 0.8125rem; text-overflow: ellipsis; white-space: nowrap; }
+.rule-structure { display: flex; gap: 0.4rem; min-width: 0; margin-top: 0.35rem; color: var(--text-muted); font-size: 0.6875rem; }
+.rule-structure code { max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.field-count { flex-shrink: 0; margin-left: 0.35rem; }
+.icon-button { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; flex: 0 0 34px; border: 0; border-radius: 50%; background: transparent; color: var(--text-muted); cursor: pointer; }
+.icon-button:hover { background: var(--error-bg); color: var(--error); }
+.icon-button svg { width: 17px; height: 17px; }
+.list-state { padding: 2.5rem 0; color: var(--text-secondary); text-align: center; font-size: 0.8125rem; }
+
+@media (max-width: 900px) {
+  .scan-form { grid-template-columns: 1fr 1fr; }
+  .scan-button { grid-column: 1 / -1; justify-self: start; }
+  .save-panel { grid-template-columns: 1fr 1fr; }
+  .scope-summary { order: 3; }
+  .save-button { order: 4; justify-self: end; }
+}
+
+@media (max-width: 640px) {
+  .page-header { align-items: stretch; flex-direction: column; }
+  .header-actions { align-self: flex-start; }
+  .scan-form, .save-panel { grid-template-columns: 1fr; }
+  .scan-button, .save-button { width: 100%; justify-self: stretch; }
+  .scope-control { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .scope-control button { padding-inline: 0.35rem; white-space: normal; }
+  .scope-summary, .save-button { order: initial; }
+  .candidate-heading { align-items: flex-start; flex-wrap: wrap; }
+  .sample-date { display: none; }
+  .rule-structure code { max-width: 120px; }
+}
 </style>

@@ -34,6 +34,7 @@
             <span class="candidate-badge">{{ container.container_tag.toUpperCase() }}</span>
             <span class="candidate-count">{{ container.item_count }} 条</span>
             <span class="candidate-hit" v-if="container.keyword_hits">命中 {{ container.keyword_hits }} 个关键词</span>
+            <span class="candidate-strategy" :class="strategyClass(container.strategy)" v-if="container.strategy">{{ strategyLabel(container.strategy) }}</span>
           </div>
           <button class="btn btn-sm btn-primary apply-btn" type="button" @click.stop="applyCandidate(container)">应用</button>
         </div>
@@ -53,15 +54,17 @@
     </div>
 
     <div class="empty-scan" v-else-if="scanned">
-      <p>未找到匹配内容，试试不同关键词或手动填写下方选择器</p>
+      <p>未找到匹配内容，试试不同关键词或展开高级设置手动配置选择器</p>
     </div>
 
     <div class="form-error" v-if="scanError">{{ scanError }}</div>
 
-    <div class="divider" />
+    <div class="advanced-toggle" @click="showAdvanced = !showAdvanced">
+      <svg :class="{ rotated: showAdvanced }" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="9 18 15 12 9 6"/></svg>
+      <span>高级设置</span>
+    </div>
 
-    <div class="manual-section">
-      <p class="manual-label">手动配置</p>
+    <div class="manual-section" v-if="showAdvanced">
       <div class="form-group">
         <label>容器选择器</label>
         <input :value="modelValue.containerSelector" @input="update('containerSelector', $event.target.value)" class="form-input" placeholder="如 div.hap_infoBox" />
@@ -139,6 +142,23 @@ const scanResult = ref(null)
 const scanned = ref(false)
 const scanError = ref(null)
 const selectedIndex = ref(null)
+const showAdvanced = ref(false)
+
+function strategyLabel(strategy) {
+  if (!strategy) return ''
+  if (strategy.startsWith('template_')) return `规则「${strategy.slice(9)}」`
+  const labels = {
+    keyword_ancestor: '关键词定位',
+    repeated_list: '重复列表',
+    link_cluster: '链接簇',
+    table_rows: '表格检测',
+  }
+  return labels[strategy] || strategy
+}
+
+function strategyClass(strategy) {
+  return strategy?.startsWith('template_') ? 'strategy-rule' : 'strategy-heuristic'
+}
 
 const keywordPlaceholder = computed(() => {
   return props.monitorType === 'field_transition' ? '价格,售价,优惠' : '公告,通知,公示'
@@ -238,6 +258,9 @@ function removeField(index) {
 .candidate-badge { font-size: 0.6875rem; font-weight: 700; color: var(--text); background: var(--bg-elevated); padding: 0.15rem 0.5rem; border-radius: var(--radius-pill); }
 .candidate-count { font-size: 0.75rem; color: var(--text-secondary); }
 .candidate-hit { font-size: 0.75rem; color: var(--green); }
+.candidate-strategy { font-size: 0.6875rem; padding: 0.1rem 0.5rem; border-radius: var(--radius-pill); white-space: nowrap; }
+.candidate-strategy.strategy-rule { color: #fff; background: #e74c3c; font-weight: 700; }
+.candidate-strategy.strategy-heuristic { color: var(--accent); background: var(--bg-elevated); }
 .apply-btn { flex-shrink: 0; }
 
 .candidate-selector { margin-bottom: 0.5rem; font-size: 0.75rem; color: var(--text-muted); }
@@ -254,7 +277,17 @@ function removeField(index) {
 
 .divider { height: 1px; background: var(--border-light); margin: 1.25rem 0; }
 
-.manual-label { font-size: 0.75rem; font-weight: 700; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 0.75rem; }
+.advanced-toggle {
+  display: inline-flex; align-items: center; gap: 0.35rem;
+  cursor: pointer; font-size: 0.75rem; font-weight: 700; color: var(--text-secondary);
+  text-transform: uppercase; letter-spacing: 1px; margin-bottom: 0.75rem;
+  user-select: none; transition: var(--transition);
+}
+.advanced-toggle:hover { color: var(--text); }
+.advanced-toggle svg { transition: transform 0.2s; }
+.advanced-toggle svg.rotated { transform: rotate(90deg); }
+
+.manual-section { margin-top: 0.75rem; }
 
 .fields-section { margin-top: 0.5rem; }
 .fields-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; }
