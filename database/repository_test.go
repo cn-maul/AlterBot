@@ -60,6 +60,37 @@ func TestCreateSiteWithFields(t *testing.T) {
 	}
 }
 
+func TestResetMonitorBaseline(t *testing.T) {
+	setupTestDB(t)
+	site := &Site{Name: "baseline-test", URL: "https://example.com", Container: "body", BaselineStatus: "ready", ConfigVersion: 1}
+	if err := CreateSiteWithFields(site); err != nil {
+		t.Fatalf("create site: %v", err)
+	}
+	snapshot := MonitorSnapshot{SiteID: site.ID, ItemKey: "item", DefinitionVersion: 1}
+	if err := GetDB().Create(&snapshot).Error; err != nil {
+		t.Fatalf("create snapshot: %v", err)
+	}
+	version, err := ResetMonitorBaseline(site.ID)
+	if err != nil {
+		t.Fatalf("reset baseline: %v", err)
+	}
+	if version != 2 {
+		t.Errorf("config version = %d, want 2", version)
+	}
+	var count int64
+	GetDB().Model(&MonitorSnapshot{}).Where("site_id = ?", site.ID).Count(&count)
+	if count != 0 {
+		t.Errorf("snapshots should be deleted, got %d", count)
+	}
+	var stored Site
+	if err := GetDB().First(&stored, site.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if stored.BaselineStatus != "needs_baseline" {
+		t.Errorf("baseline status = %s, want needs_baseline", stored.BaselineStatus)
+	}
+}
+
 func TestCreateSiteWithFields_DuplicateName(t *testing.T) {
 	setupTestDB(t)
 

@@ -29,26 +29,25 @@
       <button class="btn btn-primary btn-sm" style="margin-top: 1rem;" @click="loadData">重试</button>
     </div>
 
-    <div class="modal-overlay" v-if="showDeleteConfirm" @click.self="showDeleteConfirm = false">
-      <div class="modal-container">
-        <div class="modal-header">
-          <h2>确认删除</h2>
-          <button class="modal-close" @click="showDeleteConfirm = false">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-          </button>
-        </div>
-        <div class="modal-body">
-          <p>确定要删除监控器「{{ monitor?.name }}」吗？</p>
-          <p style="margin-top: 0.5rem;">删除后无法恢复，相关更新记录也会被清除。</p>
-        </div>
-        <div class="modal-footer">
-          <button class="btn btn-ghost" @click="showDeleteConfirm = false">取消</button>
-          <button class="btn btn-danger" @click="handleDelete" :disabled="actionLoading">{{ actionLoading ? '删除中...' : '确认删除' }}</button>
+    <template v-else-if="monitor">
+      <div class="modal-overlay" v-if="showDeleteConfirm" @click.self="showDeleteConfirm = false">
+        <div class="modal-container">
+          <div class="modal-header">
+            <h2>确认删除</h2>
+            <button class="modal-close" @click="showDeleteConfirm = false">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+          </div>
+          <div class="modal-body">
+            <p>确定要删除监控器「{{ monitor?.name }}」吗？</p>
+            <p style="margin-top: 0.5rem;">删除后无法恢复，相关更新记录也会被清除。</p>
+          </div>
+          <div class="modal-footer">
+            <button class="btn btn-ghost" @click="showDeleteConfirm = false">取消</button>
+            <button class="btn btn-danger" @click="handleDelete" :disabled="actionLoading">{{ actionLoading ? '删除中...' : '确认删除' }}</button>
+          </div>
         </div>
       </div>
-    </div>
-
-    <template v-else-if="monitor">
       <div class="detail-panel settings-section">
         <div class="detail-left">
           <div class="status-row">
@@ -84,6 +83,27 @@
               <span class="status-label">下次检查</span>
               <span class="status-value">{{ monitor.next_check ? formatTime(monitor.next_check) : '—' }}</span>
             </div>
+            <div class="status-item" v-if="monitor.strategy_type">
+              <span class="status-label">监控类型</span>
+              <span class="status-value">{{ monitor.strategy_type === 'field_transition' ? '价格监控' : '新增检测' }}</span>
+            </div>
+            <div class="status-item" v-if="monitor.baseline_status">
+              <span class="status-label">基线状态</span>
+              <span class="status-value">{{ monitor.baseline_status === 'ready' ? '已建立' : '待建立' }}</span>
+            </div>
+          </div>
+          <div class="status-actions" v-if="monitor.strategy_type === 'field_transition'">
+            <button class="btn btn-sm btn-ghost" @click="handleResetBaseline" :disabled="actionLoading">
+              重新建立基线
+            </button>
+            <button class="btn btn-sm btn-ghost" @click="handleManualCheck" :disabled="actionLoading">
+              立即检查
+            </button>
+          </div>
+          <div class="status-actions" v-else>
+            <button class="btn btn-sm btn-ghost" @click="handleManualCheck" :disabled="actionLoading">
+              立即检查
+            </button>
           </div>
         </div>
 
@@ -114,7 +134,7 @@
         </div>
       </div>
 
-      <div class="settings-section">
+      <div class="settings-section" v-if="monitor?.strategy_type !== 'field_transition'">
         <div class="section-header">
           <h2>更新历史</h2>
           <button class="btn btn-sm btn-ghost" :disabled="markLoading" @click="handleMarkAll" v-if="records.length > 0">
@@ -129,6 +149,80 @@
           <button class="btn btn-sm btn-ghost" :disabled="updatesPage >= totalUpdatePages || updatesLoading" @click="changeUpdatesPage(updatesPage + 1)">下一页</button>
         </div>
       </div>
+
+      <!-- 价格监控当前快照 -->
+      <div class="settings-section" v-if="monitor?.strategy_type === 'field_transition'">
+        <div class="section-header">
+          <h2>当前快照</h2>
+          <button class="btn btn-sm btn-ghost" @click="snapshotsExpanded = !snapshotsExpanded">
+            {{ snapshotsExpanded ? '收起' : '展开' }}
+          </button>
+        </div>
+        <template v-if="snapshotsExpanded">
+          <div class="loading" v-if="snapshotsLoading"><div class="spinner" /></div>
+          <div class="snapshots-table" v-else-if="snapshots.length > 0">
+            <div class="snapshot-row snapshot-header">
+              <span class="snap-col snap-key">商品标识</span>
+              <span class="snap-col snap-price">当前价格</span>
+              <span class="snap-col snap-currency">币种</span>
+              <span class="snap-col snap-valid">状态</span>
+              <span class="snap-col snap-time">最后更新</span>
+            </div>
+            <div class="snapshot-row" v-for="snap in snapshots" :key="snap.id || snap.item_key">
+              <span class="snap-col snap-key" :title="snap.item_key">{{ snap.item_key }}</span>
+              <span class="snap-col snap-price">{{ snap.price_display || '—' }}</span>
+              <span class="snap-col snap-currency">{{ snap.currency || '—' }}</span>
+              <span class="snap-col snap-valid">
+                <span class="valid-dot" :class="snap.price_valid ? 'valid-yes' : 'valid-no'" />
+                {{ snap.price_valid ? '有效' : '无效' }}
+              </span>
+              <span class="snap-col snap-time">{{ snap.last_seen_at ? formatTime(snap.last_seen_at) : '—' }}</span>
+            </div>
+          </div>
+          <div class="empty" v-else-if="!snapshotsLoading">
+            <p>暂无快照数据</p>
+          </div>
+        </template>
+      </div>
+
+      <!-- 价格监控事件历史 -->
+      <div class="settings-section" v-if="monitor?.strategy_type === 'field_transition'">
+        <div class="section-header">
+          <h2>价格变动历史</h2>
+          <button class="btn btn-sm btn-ghost" @click="loadEvents">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M1 4v6h6M23 20v-6h-6"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/></svg>
+            刷新
+          </button>
+        </div>
+        <div class="events-table" v-if="events.length > 0">
+          <div class="event-row" v-for="evt in events" :key="evt.id">
+            <div class="event-type-badge" :class="'event-' + evt.event_type">
+              {{ evt.event_type === 'price_dropped' ? '降价' : (evt.event_type === 'price_target_reached' ? '到价' : evt.event_type) }}
+            </div>
+            <div class="event-info">
+              <span class="event-title">{{ evt.title }}</span>
+              <span class="event-price" v-if="evt.event_type === 'price_dropped' || evt.event_type === 'price_target_reached'">
+                <span class="old-price">{{ evt.old_value }}</span>
+                <span class="price-arrow">→</span>
+                <span class="new-price">{{ evt.new_value }}</span>
+                <span class="price-drop" v-if="evt.event_type === 'price_dropped' && evt.change_percent > 0">-{{ evt.change_percent.toFixed(1) }}%</span>
+              </span>
+            </div>
+            <div class="event-time">{{ formatTime(evt.occurred_at) }}</div>
+            <div class="event-notified" :class="'status-' + eventDeliveryStatus(evt)">
+              {{ deliveryStatusLabel(evt) }}
+            </div>
+          </div>
+        </div>
+        <div class="empty" v-else-if="!eventsLoading">
+          <p>暂无价格变动记录</p>
+        </div>
+        <div class="pagination" v-if="eventsTotal > eventsPageSize">
+          <button class="btn btn-sm btn-ghost" :disabled="eventsPage <= 1" @click="changeEventsPage(eventsPage - 1)">上一页</button>
+          <span>第 {{ eventsPage }} / {{ totalEventPages }} 页</span>
+          <button class="btn btn-sm btn-ghost" :disabled="eventsPage >= totalEventPages" @click="changeEventsPage(eventsPage + 1)">下一页</button>
+        </div>
+      </div>
     </template>
   </div>
 </template>
@@ -136,7 +230,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { fetchMonitor, fetchUpdates, startMonitor, stopMonitor, deleteMonitor, markAllNotified, markRead, fetchMonitorConfig, fetchAccounts, updateNotifyAccounts } from '../api/monitors'
+import { fetchMonitor, fetchUpdates, fetchEvents, fetchMonitorConfig, fetchSnapshots, fetchAccounts, updateNotifyAccounts, startMonitor, stopMonitor, deleteMonitor, markAllNotified, markRead, resetBaseline, manualCheck } from '../api/monitors'
 import StatusBadge from '../components/StatusBadge.vue'
 import UpdateTable from '../components/UpdateTable.vue'
 import { useToastMessages } from '../composables/useToastMessages'
@@ -164,6 +258,19 @@ const selectedAccountIDs = ref([])
 const accountDirty = ref(false)
 const savingAccounts = ref(false)
 
+// 事件历史
+const events = ref([])
+const eventsPage = ref(1)
+const eventsPageSize = 20
+const eventsTotal = ref(0)
+const eventsLoading = ref(false)
+const totalEventPages = computed(() => Math.max(1, Math.ceil(eventsTotal.value / eventsPageSize)))
+
+// 快照
+const snapshots = ref([])
+const snapshotsLoading = ref(false)
+const snapshotsExpanded = ref(false)
+
 onMounted(loadData)
 
 async function loadData() {
@@ -186,6 +293,12 @@ async function loadData() {
     // 解析当前监控器的启用账户 ID
     if (configRes && configRes.code === 0 && configRes.data) {
       selectedAccountIDs.value = configRes.data.notify_account_ids || []
+    }
+
+    // 如果是价格监控，加载事件历史
+    if (monitor.value?.strategy_type === 'field_transition') {
+      loadEvents()
+      loadSnapshots()
     }
   } catch (e) { error.value = e.response?.data?.message || e.message }
   finally { loading.value = false }
@@ -211,6 +324,24 @@ async function changeUpdatesPage(page) {
   if (page < 1 || page > totalUpdatePages.value) return
   updatesPage.value = page
   await loadUpdates()
+}
+
+async function loadEvents() {
+  eventsLoading.value = true
+  try {
+    const res = await fetchEvents(route.params.name, { page: eventsPage.value, size: eventsPageSize })
+    if (res.code === 0 && res.data) {
+      events.value = res.data.events || []
+      eventsTotal.value = res.data.total || 0
+    }
+  } catch { /* ignore */ }
+  finally { eventsLoading.value = false }
+}
+
+async function changeEventsPage(page) {
+  if (page < 1 || page > totalEventPages.value) return
+  eventsPage.value = page
+  await loadEvents()
 }
 
 async function toggleRun() {
@@ -276,6 +407,20 @@ async function saveAccounts() {
 }
 
 function formatTime(t) { if (!t) return '—'; return new Date(t).toLocaleString('zh-CN') }
+function eventDeliveryStatus(evt) {
+  if (evt?.delivery_status) return evt.delivery_status
+  return evt?.notified ? 'delivered' : 'pending'
+}
+function deliveryStatusLabel(evt) {
+  const labels = {
+    pending: '待推送',
+    delivered: '已推送',
+    skipped: '已跳过',
+    partial: '部分成功',
+    failed: '推送失败',
+  }
+  return labels[eventDeliveryStatus(evt)] || eventDeliveryStatus(evt)
+}
 function formatInterval(ns) { if (!ns) return '—'; const s = Math.floor(ns / 1e9); if (s >= 3600) return `${Math.round(s / 3600)} 小时`; if (s >= 60) return `${Math.round(s / 60)} 分钟`; return `${s} 秒` }
 function formatDuration(ns) { if (!ns) return '—'; const ms = Math.round(ns / 1e6); if (ms >= 1000) return `${(ms / 1000).toFixed(1)}s`; return `${ms}ms` }
 function serviceLabel(s) {
@@ -283,6 +428,53 @@ function serviceLabel(s) {
   if (s === 'webhook') return 'Webhook'
   if (s === 'serverchan') return 'Server酱'
   return s
+}
+
+async function handleResetBaseline() {
+  if (!confirm('确定要重新建立基线吗？这将清除当前比较基准，但不会删除历史事件。')) return
+  actionLoading.value = true
+  try {
+    await resetBaseline(route.params.name)
+    showSuccess('基线已重置，下次检查将建立新基线')
+    await loadData()
+  } catch (e) {
+    showError('重置失败: ' + (e.response?.data?.message || e.message))
+  } finally {
+    actionLoading.value = false
+  }
+}
+
+async function loadSnapshots() {
+  snapshotsLoading.value = true
+  try {
+    const res = await fetchSnapshots(route.params.name)
+    if (res.code === 0 && res.data) {
+      snapshots.value = Array.isArray(res.data) ? res.data : (res.data.snapshots || [])
+    }
+  } catch { /* ignore */ }
+  finally { snapshotsLoading.value = false }
+}
+
+async function handleManualCheck() {
+  actionLoading.value = true
+  try {
+    const res = await manualCheck(route.params.name)
+    const outcome = res.data || {}
+    if (outcome.is_first_baseline) {
+      showSuccess(monitor.value?.strategy_type === 'field_transition'
+        ? '检查完成，已建立新的价格基线，本次未发送通知'
+        : '检查完成，已建立初始基线')
+    } else if ((outcome.count || 0) > 0) {
+      showSuccess(`检查完成，发现 ${outcome.count} 条变化`)
+    } else {
+      showSuccess('检查完成，未发现符合条件的变化')
+    }
+    await loadData()
+  } catch (e) {
+    showError('检查失败: ' + (e.response?.data?.message || e.message))
+  } finally {
+    actionLoading.value = false
+  }
 }
 </script>
 
@@ -294,6 +486,7 @@ function serviceLabel(s) {
 .status-label { font-size: 0.6875rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.8px; }
 .status-value { font-size: 0.875rem; color: var(--text); word-break: break-all; }
 .error-text { color: var(--error); }
+.status-actions { display: flex; gap: 0.5rem; margin-top: 1rem; }
 
 /* 统一返回按钮 */
 .back-btn {
@@ -356,6 +549,42 @@ function serviceLabel(s) {
 .accounts-actions { margin-top: 0.75rem; display: flex; justify-content: flex-end; }
 .hint { font-size: 0.75rem; color: var(--text-muted); margin-top: 0.5rem; }
 .pagination { display: flex; align-items: center; justify-content: center; gap: 0.75rem; margin-top: 1rem; font-size: 0.8125rem; color: var(--text-muted); }
+
+/* 快照表格 */
+.snapshots-table { display: flex; flex-direction: column; gap: 0.2rem; }
+.snapshot-row { display: flex; align-items: center; gap: 0.75rem; padding: 0.4rem 0.75rem; background: var(--bg-card); border-radius: var(--radius-lg); font-size: 0.8125rem; }
+.snapshot-header { background: transparent; font-weight: 700; font-size: 0.6875rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.8px; }
+.snap-col { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.snap-key { flex: 2; }
+.snap-price { flex: 1; font-weight: 700; font-variant-numeric: tabular-nums; }
+.snap-currency { flex: 0.5; color: var(--text-muted); }
+.snap-valid { flex: 0.5; display: flex; align-items: center; gap: 0.3rem; }
+.snap-time { flex: 1; color: var(--text-muted); font-size: 0.75rem; }
+.valid-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+.valid-yes { background: var(--green); }
+.valid-no { background: var(--error); }
+
+/* 事件表格 */
+.events-table { display: flex; flex-direction: column; gap: 0.25rem; }
+.event-row { display: flex; align-items: center; gap: 0.75rem; padding: 0.5rem 0.75rem; background: var(--bg-card); border-radius: var(--radius-lg); font-size: 0.8125rem; }
+.event-type-badge { font-size: 0.625rem; font-weight: 700; padding: 0.15rem 0.4rem; border-radius: var(--radius-pill); flex-shrink: 0; }
+.event-price_dropped { background: #ff4444; color: #fff; }
+.event-price_target_reached { background: #7c4dff; color: #fff; }
+.event-item_added { background: var(--green); color: #000; }
+.event-info { flex: 1; display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; }
+.event-title { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.event-price { display: flex; align-items: center; gap: 0.4rem; font-size: 0.75rem; }
+.old-price { color: var(--text-muted); text-decoration: line-through; }
+.price-arrow { color: var(--text-muted); }
+.new-price { color: var(--text); font-weight: 700; }
+.price-drop { color: #ff4444; font-weight: 700; }
+.event-time { color: var(--text-muted); font-size: 0.75rem; flex-shrink: 0; }
+.event-notified { font-size: 0.625rem; font-weight: 700; padding: 0.1rem 0.4rem; border-radius: var(--radius-pill); flex-shrink: 0; }
+.event-notified.status-delivered { background: var(--green); color: #000; }
+.event-notified.status-pending { background: var(--bg-elevated); color: var(--text-muted); }
+.event-notified.status-skipped { background: var(--bg-elevated); color: var(--text-secondary); }
+.event-notified.status-partial { background: #ffb020; color: #000; }
+.event-notified.status-failed { background: var(--error); color: #fff; }
 
 @media (max-width: 768px) {
   .status-grid { grid-template-columns: 1fr; }

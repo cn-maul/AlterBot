@@ -1,6 +1,7 @@
 package monitor
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"sync"
@@ -15,17 +16,21 @@ var (
 )
 
 type MonitorStatus struct {
-	Name          string        `json:"name"`
-	URL           string        `json:"url"`
-	Group         string        `json:"group"`
-	IsRunning     bool          `json:"is_running"`
-	LastCheck     time.Time     `json:"last_check"`
-	LastDuration  time.Duration `json:"last_duration"`
-	LastError     string        `json:"last_error,omitempty"`
-	LastUpdate    time.Time     `json:"last_update,omitempty"`
-	UpdatesCount  int           `json:"updates_count"`
-	NextCheck     time.Time     `json:"next_check"`
-	CheckInterval time.Duration `json:"check_interval"`
+	Name           string        `json:"name"`
+	URL            string        `json:"url"`
+	Group          string        `json:"group"`
+	IsRunning      bool          `json:"is_running"`
+	LastCheck      time.Time     `json:"last_check"`
+	LastDuration   time.Duration `json:"last_duration"`
+	LastError      string        `json:"last_error,omitempty"`
+	LastUpdate     time.Time     `json:"last_update,omitempty"`
+	UpdatesCount   int           `json:"updates_count"`
+	NextCheck      time.Time     `json:"next_check"`
+	CheckInterval  time.Duration `json:"check_interval"`
+	StrategyType   string        `json:"strategy_type,omitempty"`
+	BaselineStatus string        `json:"baseline_status,omitempty"`
+	LastEventAt    *time.Time    `json:"last_event_at,omitempty"`
+	SnapshotCount  int           `json:"snapshot_count,omitempty"`
 }
 
 // AtomicReplaceMonitor 原子式替换监控器：停止旧实例 → 注销旧名 → 创建新实例 → 启动/停止
@@ -37,14 +42,24 @@ func AtomicReplaceMonitor(site *database.Site, oldName string) (*Monitor, error)
 	// 如果名字不同，停止并移除旧的
 	if oldName != "" && oldName != site.Name {
 		if old := monitors[oldName]; old != nil {
-			old.Stop()
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			err := old.StopAndWait(ctx)
+			cancel()
+			if err != nil {
+				return nil, fmt.Errorf("等待旧监控器停止失败: %w", err)
+			}
 			delete(monitors, oldName)
 		}
 	}
 
 	// 如果同名的已存在（重名或重载），停止并移除
 	if existing := monitors[site.Name]; existing != nil {
-		existing.Stop()
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		err := existing.StopAndWait(ctx)
+		cancel()
+		if err != nil {
+			return nil, fmt.Errorf("等待同名监控器停止失败: %w", err)
+		}
 		delete(monitors, site.Name)
 	}
 
@@ -74,6 +89,11 @@ func NewMonitorUnlocked(site *database.Site) *Monitor {
 	m := newMonitor(site)
 	registerMonitorLocked(m)
 	return m
+}
+
+// NewDetachedMonitor 创建不注册、不启动的监控器，供一次性手动检查使用。
+func NewDetachedMonitor(site *database.Site) *Monitor {
+	return newMonitor(site)
 }
 
 func registerMonitorLocked(m *Monitor) {
@@ -166,7 +186,12 @@ func StopSite(name string) error {
 	if m == nil {
 		return fmt.Errorf("监控器「%s」不存在", name)
 	}
-	m.Stop()
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	err := m.StopAndWait(ctx)
+	cancel()
+	if err != nil {
+		return fmt.Errorf("等待监控器停止失败: %w", err)
+	}
 	if err := SetSiteActive(name, false); err != nil {
 		return fmt.Errorf("更新站点活跃状态失败: %w", err)
 	}
@@ -176,7 +201,13 @@ func StopSite(name string) error {
 func RestartSite(site *database.Site) error {
 	monitorsLock.Lock()
 	if existing := monitors[site.Name]; existing != nil {
-		existing.Stop()
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		err := existing.StopAndWait(ctx)
+		cancel()
+		if err != nil {
+			monitorsLock.Unlock()
+			return fmt.Errorf("等待监控器停止失败: %w", err)
+		}
 		delete(monitors, site.Name)
 	}
 	m := NewMonitorUnlocked(site)
@@ -226,11 +257,26 @@ func StopAll() {
 		m, exists := monitors[name]
 		monitorsLock.RUnlock()
 		if exists {
-			m.Stop()
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			if err := m.StopAndWait(ctx); err != nil {
+				log.Printf("[%s] 等待监控器停止失败: %v", name, err)
+			}
+			cancel()
 			log.Printf("[%s] 监控器已停止", name)
 		}
 	}
 	log.Println("[Monitor] 所有监控器已停止")
+}
+
+// QuiesceMonitor 停止并等待指定监控器退出，但保留 registry 条目供后续原子替换。
+func QuiesceMonitor(name string, ctx context.Context) error {
+	monitorsLock.RLock()
+	m := monitors[name]
+	monitorsLock.RUnlock()
+	if m == nil {
+		return nil
+	}
+	return m.StopAndWait(ctx)
 }
 
 func StopMonitor(name string) bool {

@@ -7,307 +7,91 @@
       </div>
     </div>
 
-    <!-- ===== 编辑模式 ===== -->
-    <template v-if="isEdit">
-      <div class="loading" v-if="loading">
-        <div class="spinner" />
-        <p>加载配置...</p>
+    <!-- ===== Preview Panel ===== -->
+    <div class="preview-panel" v-if="showPreview">
+      <div class="section-header">
+        <h2>预览抓取结果</h2>
+        <button class="btn btn-sm btn-ghost" @click="showPreview = false">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          关闭
+        </button>
       </div>
-
-      <template v-else>
-        <div class="settings-section">
-          <div class="section-header">
-            <h2>基础配置</h2>
+      <div class="form-group">
+        <label>关键词（辅助验证，多个用逗号隔开）</label>
+        <div class="preview-input-row">
+          <input v-model="previewKeyword" class="form-input" placeholder="公告" @keyup.enter="runPreview" />
+          <button class="btn btn-sm btn-primary" :disabled="previewLoading" @click="runPreview">{{ previewLoading ? '扫描中' : '扫描' }}</button>
+        </div>
+      </div>
+      <div class="loading" v-if="previewLoading"><div class="spinner" /><p>扫描中...</p></div>
+      <div class="preview-results" v-else-if="previewData && previewData.containers && previewData.containers.length > 0">
+        <div
+          v-for="(c, ci) in previewData.containers"
+          :key="ci"
+          class="preview-card"
+          :class="{ selected: selectedPreviewIndex === ci }"
+          @click="selectedPreviewIndex = ci"
+        >
+          <div class="preview-card-header">
+            <span class="candidate-badge">{{ c.container_tag.toUpperCase() }}</span>
+            <span class="candidate-count">{{ c.item_count }} 条</span>
+            <button class="btn btn-sm btn-primary apply-candidate" type="button" @click.stop="applyPreviewCandidate(c)">应用此配置</button>
           </div>
-
-          <div class="form-group">
-            <label>名称</label>
-            <input v-model="form.name" class="form-input" placeholder="如 招录公告" />
+          <div class="candidate-selectors">
+            <code>{{ c.config?.container || c.container_css }}</code>
+            <span> / </span>
+            <code>{{ c.config?.item || c.item_css || '单项' }}</code>
           </div>
-
-          <div class="form-group">
-            <label>URL</label>
-            <input v-model="form.url" class="form-input" placeholder="https://example.com/zlgg/" />
-          </div>
-
-          <div class="form-group">
-            <label>分组</label>
-            <input v-model="form.group" class="form-input" placeholder="默认" />
-          </div>
-
-          <div class="form-group">
-            <label>检查间隔（秒）</label>
-            <input v-model.number="form.check_interval" class="form-input" type="number" min="10" placeholder="3600（默认1小时）" />
-          </div>
-
-          <div class="form-group">
-            <label>推送过滤</label>
-            <div class="filter-mode-row">
-              <label class="radio-label" :class="{ active: form.notify_filter === 'all' }">
-                <input type="radio" v-model="form.notify_filter" value="all" />
-                有新内容就推送
-              </label>
-              <label class="radio-label" :class="{ active: form.notify_filter === 'keyword' }">
-                <input type="radio" v-model="form.notify_filter" value="keyword" />
-                仅命中关键词时推送
-              </label>
-            </div>
-            <div class="form-group" v-if="form.notify_filter === 'keyword'" style="margin-top: 0.5rem;">
-              <label>推送关键词（多个用逗号隔开）</label>
-              <input v-model="form.notify_keywords" class="form-input" placeholder="面试,录用,公示" />
+          <div class="preview-samples">
+            <div v-for="(item, ii) in c.sample_items" :key="ii" class="sample-item">
+              <span class="sample-title">{{ item.title }}</span>
             </div>
           </div>
         </div>
+      </div>
+      <div class="empty" v-else-if="previewScanned">
+        <p>未找到匹配内容，试试不同关键词或调整选择器</p>
+      </div>
+      <div class="form-error" v-if="previewError">{{ previewError }}</div>
+    </div>
 
-        <div class="settings-section">
-          <div class="section-header">
-            <h2>提取配置</h2>
-            <div class="section-actions">
-              <button class="btn btn-sm btn-ghost" @click="togglePreview" :disabled="!form.url.trim()">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                预览抓取
-              </button>
-            </div>
-          </div>
+    <!-- ===== Loading ===== -->
+    <div class="loading" v-if="isEdit && loading">
+      <div class="spinner" />
+      <p>加载配置...</p>
+    </div>
 
-          <div class="preview-panel" v-if="showPreview">
-            <div class="form-group">
-              <label>关键词（辅助验证，多个用逗号隔开）</label>
-              <div class="preview-input-row">
-                <input v-model="previewKeyword" class="form-input" placeholder="面试,录用,公示" @keyup.enter="runPreview" />
-                <button class="btn btn-sm btn-primary" :disabled="previewLoading" @click="runPreview">{{ previewLoading ? '扫描中' : '扫描' }}</button>
-              </div>
-            </div>
-
-            <div class="loading" v-if="previewLoading"><div class="spinner" /><p>扫描中...</p></div>
-
-            <div class="preview-results" v-else-if="previewData && previewData.containers && previewData.containers.length > 0">
-              <div v-for="(c, ci) in previewData.containers" :key="ci" class="preview-card">
-                <div class="preview-card-header">
-                  <span class="candidate-badge">{{ c.container_tag.toUpperCase() }}</span>
-                  <span class="candidate-count">{{ c.item_count }} 条</span>
-                </div>
-                <div class="preview-samples">
-                  <div v-for="(item, ii) in c.sample_items" :key="ii" class="sample-item">
-                    <span class="sample-title">{{ item.title }}</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div class="empty" v-else-if="previewScanned">
-              <p>未找到匹配内容，试试不同关键词或调整选择器</p>
-            </div>
-          </div>
-
-          <div class="form-group">
-            <label>容器选择器</label>
-            <input v-model="form.container" class="form-input" placeholder="如 div.hap_infoBox" />
-          </div>
-
-          <div class="form-group">
-            <label>列表项选择器（可选）</label>
-            <input v-model="form.item" class="form-input" placeholder="如 div.hap_infoOne" />
-          </div>
-
-          <FieldEditor v-model="form.fields" />
-
-          <div class="form-group">
-            <label class="checkbox-label">
-              <input v-model="form.is_active" type="checkbox" />
-              保存后立即启动监控
-            </label>
-          </div>
-
-          <div class="form-error" v-if="submitError">{{ submitError }}</div>
-
-          <div class="form-actions">
-            <router-link to="/" class="btn btn-ghost">取消</router-link>
-            <button class="btn btn-primary" :disabled="submitting" @click="handleSubmit">
-              {{ submitting ? '提交中...' : '保存修改' }}
-            </button>
-          </div>
-        </div>
-      </template>
-    </template>
-
-    <!-- ===== 新增模式 ===== -->
+    <!-- ===== Form ===== -->
     <template v-else>
-      <div class="mode-tabs">
-        <button class="mode-tab" :class="{ active: mode === 'quick' }" @click="mode = 'quick'">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-          快速模式
-        </button>
-        <button class="mode-tab" :class="{ active: mode === 'advanced' }" @click="mode = 'advanced'">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M12 15V3m0 12l-4-4m4 4l4-4M2 17l.621 2.485A2 2 0 004.561 21h14.878a2 2 0 001.94-1.515L22 17"/></svg>
-          高级模式
-        </button>
-      </div>
-
-      <!-- 快速模式 -->
-      <template v-if="mode === 'quick'">
-        <div class="settings-section" v-if="step === 1">
-          <div class="section-header">
-            <h2>输入网址和关键词</h2>
-            <p class="section-desc">告诉系统要监控哪个网页，以及关注什么内容</p>
-          </div>
-          <div class="form-group">
-            <label>网页 URL</label>
-            <input v-model="quickForm.url" class="form-input" placeholder="https://example.com/announce/" />
-          </div>
-          <div class="form-group">
-            <label>关键词（多个用逗号隔开）</label>
-            <input v-model="quickForm.keywords" class="form-input" placeholder="面试,录用,公示" />
-            <p class="hint">系统会根据关键词自动定位网页中的列表区域</p>
-          </div>
-          <div class="form-error" v-if="scanError">{{ scanError }}</div>
-          <div class="form-actions">
-            <router-link to="/" class="btn btn-ghost">取消</router-link>
-            <button class="btn btn-primary" :disabled="scanning" @click="handleScan">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-              {{ scanning ? '扫描中...' : '预扫描' }}
-            </button>
-          </div>
-        </div>
-
-        <div class="settings-section" v-if="step === 2">
-          <div class="step-indicator">
-            <span class="step-dot done">①</span><span class="step-line"/><span class="step-dot active">②</span><span class="step-line"/><span class="step-dot">③</span>
-          </div>
-          <div class="section-header">
-            <h2>选择抓取区域</h2>
-            <p class="section-desc">系统发现 {{ scanResult.containers.length }} 个数据区域，选择符合预期的一个</p>
-          </div>
-          <div v-for="(container, ci) in scanResult.containers" :key="ci" class="candidate-card" :class="{ selected: selectedContainer === ci }" @click="selectedContainer = ci">
-            <div class="candidate-header">
-              <div class="candidate-info">
-                <span class="candidate-badge">{{ container.container_tag.toUpperCase() }}</span>
-                <span class="candidate-count">{{ container.item_count }} 条内容</span>
-                <span class="candidate-hit">命中 {{ container.keyword_hits }} 个关键词</span>
-              </div>
-              <div class="candidate-check" v-if="selectedContainer === ci">
-                <svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
-              </div>
-            </div>
-            <div class="candidate-selector"><code>{{ container.container_css }}</code></div>
-            <div class="sample-list">
-              <div v-for="(item, ii) in container.sample_items" :key="ii" class="sample-item">
-                <span class="sample-title">{{ item.title }}</span>
-                <span class="sample-meta" v-if="item.date">{{ item.date }}</span>
-              </div>
-              <div class="sample-more" v-if="container.item_count > container.sample_items.length">...还有 {{ container.item_count - container.sample_items.length }} 条</div>
-            </div>
-          </div>
-          <div class="empty" v-if="scanResult.containers.length === 0">
-            <p>未找到匹配的内容区域</p>
-            <p style="color: var(--text-muted); font-size: 0.8125rem; margin-top: 0.25rem;">试试不同的关键词，或切换到高级模式手动配置</p>
-          </div>
-          <div class="form-actions" v-if="scanResult.containers.length > 0">
-            <button class="btn btn-ghost" @click="step = 1">重新扫描</button>
-            <button class="btn btn-primary" @click="step = 3">下一步 →</button>
-          </div>
-        </div>
-
-        <div class="settings-section" v-if="step === 3">
-          <div class="step-indicator">
-            <span class="step-dot done">①</span><span class="step-line"/><span class="step-dot done">②</span><span class="step-line"/><span class="step-dot active">③</span>
-          </div>
-          <div class="section-header">
-            <h2>确认并保存</h2>
-            <p class="section-desc">为这个监控器起个名字</p>
-          </div>
-          <div class="form-group">
-            <label>监控器名称</label>
-            <input v-model="quickForm.name" class="form-input" placeholder="如 招录公告" />
-          </div>
-          <div class="summary-card">
-            <div class="summary-row"><span class="summary-label">URL</span><span class="summary-value">{{ quickForm.url }}</span></div>
-            <div class="summary-row"><span class="summary-label">容器</span><code class="summary-code">{{ selectedCandidate?.config?.container }}</code></div>
-            <div class="summary-row"><span class="summary-label">列表项</span><code class="summary-code">{{ selectedCandidate?.config?.item }}</code></div>
-            <div class="summary-row"><span class="summary-label">字段</span><span class="summary-value">{{ (selectedCandidate?.config?.fields || []).map(f => f.name).join(', ') }}</span></div>
-            <div class="summary-row"><span class="summary-label">关键词</span><span class="summary-value">{{ quickForm.keywords }}</span></div>
-            <div class="summary-row"><span class="summary-label">预计条目</span><span class="summary-value">{{ selectedContainerCount }} 条</span></div>
-          </div>
-          <div class="form-error" v-if="createError">{{ createError }}</div>
-          <div class="form-actions">
-            <button class="btn btn-ghost" @click="step = 2">上一步</button>
-            <button class="btn btn-ghost btn-sm" @click="handleSaveAsRule" :disabled="creating" v-if="selectedCandidate?.config" style="margin-right: auto;">另存为规则模板</button>
-            <button class="btn btn-primary" :disabled="creating" @click="handleCreate">{{ creating ? '创建中...' : '创建监控器' }}</button>
-          </div>
-        </div>
-      </template>
-
-      <!-- 高级模式 -->
-      <template v-if="mode === 'advanced'">
-        <div class="settings-section">
-          <div class="section-header"><h2>基础配置</h2></div>
-          <div class="form-group">
-            <label>名称</label>
-            <input v-model="form.name" class="form-input" placeholder="如 招录公告" />
-          </div>
-          <div class="form-group">
-            <label>URL</label>
-            <input v-model="form.url" class="form-input" placeholder="https://example.com/zlgg/" />
-          </div>
-          <div class="form-group">
-            <label>分组</label>
-            <input v-model="form.group" class="form-input" placeholder="默认" />
-          </div>
-          <div class="form-group">
-            <label>检查间隔（秒）</label>
-            <input v-model.number="form.check_interval" class="form-input" type="number" min="10" placeholder="3600（默认1小时）" />
-          </div>
-          <div class="form-group">
-            <label>推送过滤</label>
-            <div class="filter-mode-row">
-              <label class="radio-label" :class="{ active: form.notify_filter === 'all' }">
-                <input type="radio" v-model="form.notify_filter" value="all" />
-                有新内容就推送
-              </label>
-              <label class="radio-label" :class="{ active: form.notify_filter === 'keyword' }">
-                <input type="radio" v-model="form.notify_filter" value="keyword" />
-                仅命中关键词时推送
-              </label>
-            </div>
-            <div class="form-group" v-if="form.notify_filter === 'keyword'" style="margin-top: 0.5rem;">
-              <label>推送关键词（多个用逗号隔开）</label>
-              <input v-model="form.notify_keywords" class="form-input" placeholder="面试,录用,公示" />
-            </div>
-          </div>
-        </div>
-        <div class="settings-section">
-          <div class="section-header"><h2>提取配置</h2></div>
-          <div class="form-group">
-            <label>容器选择器</label>
-            <input v-model="form.container" class="form-input" placeholder="如 div.hap_infoBox" />
-          </div>
-          <div class="form-group">
-            <label>列表项选择器（可选）</label>
-            <input v-model="form.item" class="form-input" placeholder="如 div.hap_infoOne" />
-          </div>
-          <FieldEditor v-model="form.fields" />
-          <div class="form-group">
-            <label class="checkbox-label">
-              <input v-model="form.is_active" type="checkbox" />
-              保存后立即启动监控
-            </label>
-          </div>
-          <div class="form-error" v-if="submitError">{{ submitError }}</div>
-          <div class="form-actions">
-            <router-link to="/" class="btn btn-ghost">取消</router-link>
-            <button class="btn btn-primary" :disabled="submitting" @click="handleSubmit">{{ submitting ? '提交中...' : '创建并启动' }}</button>
-          </div>
-        </div>
-      </template>
+      <MonitorForm
+        :form="form"
+        :showTypeSelector="true"
+        :accounts="accounts"
+        :error="submitError"
+        :validationResult="validationResult"
+        :validationLoading="validationLoading"
+        :showBaselineWarning="baselineWarning"
+        @preview="openPreview"
+        @validate="runValidation"
+        @update:form="onFormUpdate"
+      >
+        <template #actions>
+          <button v-if="!isEdit" class="btn btn-ghost btn-sm" @click="handleSaveAsRule" :disabled="submitting" style="margin-right: auto;">另存为规则模板</button>
+          <button class="btn btn-primary" :disabled="submitting" @click="handleSubmit">
+            {{ submitting ? '提交中...' : (isEdit ? '保存修改' : '创建并启动') }}
+          </button>
+        </template>
+      </MonitorForm>
     </template>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, reactive, onMounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { createMonitor, updateMonitor, fetchMonitorConfig, previewScan, smartCreate, createScanRule } from '../api/monitors'
-import FieldEditor from '../components/FieldEditor.vue'
+import { createMonitor, updateMonitor, fetchMonitorConfig, fetchAccounts, previewScan, createScanRule, validateMonitorConfig } from '../api/monitors'
+import MonitorForm from '../components/monitor/form/MonitorForm.vue'
+import { createEmptyForm, toMonitorRequest, fromMonitorResponse, hasSemanticChange, validateForm, getDetectionFingerprint } from '../composables/useMonitorForm'
 import { useToastMessages } from '../composables/useToastMessages'
 
 const router = useRouter()
@@ -315,75 +99,151 @@ const route = useRoute()
 const { showSuccess, showError } = useToastMessages()
 
 const isEdit = computed(() => !!route.params.name)
+const loading = ref(false)
 const submitting = ref(false)
 const submitError = ref(null)
 
-// 高级模式表单（新增 + 编辑共用）
-const loading = ref(false)
-const form = ref({
-  name: '', url: '', group: '', container: '', item: '',
-  check_interval: 3600, is_active: true,
-  notify_filter: 'all', notify_keywords: '',
-  notify_account_ids: '',
-  fields: [{ name: 'title', selector: 'a', type: 'text', attr: '', transform: '' }],
-})
+const form = reactive(createEmptyForm())
+const originalFormSnapshot = ref(null)
 
-// 编辑模式预览
+const accounts = ref([])
+
+// Preview
 const showPreview = ref(false)
 const previewKeyword = ref('')
 const previewLoading = ref(false)
 const previewData = ref(null)
 const previewScanned = ref(false)
+const previewError = ref(null)
+const selectedPreviewIndex = ref(null)
 
-function togglePreview() {
-  showPreview.value = !showPreview.value
-  if (!showPreview.value) {
-    previewData.value = null
-    previewScanned.value = false
-  }
+// Validation
+const validationResult = ref(null)
+const validationLoading = ref(false)
+const validatedFingerprint = ref('')
+const validationAttemptFingerprint = ref('')
+
+// Baseline warning
+const baselineWarning = ref(false)
+
+function openPreview() {
+  showPreview.value = true
 }
 
 async function runPreview() {
-  if (!form.value.url.trim()) return
+  if (!form.basic.url.trim()) return
   previewLoading.value = true
   previewScanned.value = false
+  previewError.value = null
+  selectedPreviewIndex.value = null
   try {
     const res = await previewScan({
-      url: form.value.url.trim(),
-      keywords: previewKeyword.value || '公告',
+      url: form.basic.url.trim(),
+      keywords: previewKeyword.value || (form.monitorType === 'field_transition' ? '价格,售价,优惠' : '公告'),
     })
     if (res.code === 0 && res.data) {
       previewData.value = res.data
     }
-  } catch { /* ignore */ }
+  } catch (e) {
+    previewError.value = e.response?.data?.message || e.message || '扫描失败'
+  }
   previewScanned.value = true
   previewLoading.value = false
 }
 
-// 加载编辑数据
+function normalizeScanFields(fields) {
+  return (fields || []).map(field => ({
+    name: field.name || '',
+    selector: field.selector || '',
+    type: field.type || 'text',
+    attr: field.attr || '',
+    transform: field.transform || '',
+  }))
+}
+
+function ensurePriceField() {
+  if (form.monitorType !== 'field_transition') return
+  const currentTarget = form.rule.target.field || 'price'
+  if (!form.extraction.fields.some(field => field.name === currentTarget)) {
+    form.extraction.fields.push({ name: currentTarget, selector: '.price', type: 'text', attr: '', transform: '' })
+  }
+  form.rule.target.field = currentTarget
+  form.rule.target.valueType = 'money'
+  if (!['decreased', 'at_or_below'].includes(form.rule.transition.operator)) {
+    form.rule.transition.operator = 'decreased'
+  }
+}
+
+function applyPreviewCandidate(candidate) {
+  const config = candidate.config || {}
+  const fields = normalizeScanFields(config.fields)
+  form.extraction.containerSelector = config.container || candidate.container_css || ''
+  form.extraction.itemSelector = config.item || candidate.item_css || ''
+  if (fields.length > 0) form.extraction.fields = fields
+  if (form.monitorType === 'field_transition') {
+    form.rule.pageMode = form.extraction.itemSelector ? 'list' : 'single'
+    if (form.rule.pageMode === 'list') form.rule.identity.mode = 'field'
+    ensurePriceField()
+  }
+  showPreview.value = false
+  showSuccess('已应用扫描候选配置，可继续调整字段和规则')
+}
+
+function onFormUpdate(newForm) {
+  Object.assign(form, newForm)
+}
+
+// Watch for semantic changes in edit mode
+watch(() => form.monitorType, (monitorType) => {
+  if (monitorType === 'field_transition') {
+    form.rule.pageMode = form.extraction.itemSelector.trim() ? 'list' : 'single'
+    if (form.rule.pageMode === 'list' && form.rule.identity.mode === 'source_url') {
+      form.rule.identity = { mode: 'field', field: '' }
+    }
+    ensurePriceField()
+  }
+})
+
+watch(
+  () => getDetectionFingerprint(form),
+  (fingerprint) => {
+    if (validatedFingerprint.value && validatedFingerprint.value !== fingerprint) {
+      validatedFingerprint.value = ''
+      validationResult.value = null
+    }
+    baselineWarning.value = Boolean(
+      isEdit.value && originalFormSnapshot.value && hasSemanticChange(originalFormSnapshot.value, form),
+    )
+  }
+)
+
+watch(
+  () => JSON.stringify(toMonitorRequest(form)),
+  (fingerprint) => {
+    if (validationAttemptFingerprint.value && validationAttemptFingerprint.value !== fingerprint) {
+      validationAttemptFingerprint.value = ''
+      validationResult.value = null
+    }
+  }
+)
+
+// Load accounts and edit data
 onMounted(async () => {
+  try {
+    const acctRes = await fetchAccounts()
+    accounts.value = (acctRes.code === 0 ? acctRes.data : []) || []
+  } catch { /* ignore */ }
+
   if (isEdit.value) {
     loading.value = true
     try {
       const res = await fetchMonitorConfig(route.params.name)
       if (res.code === 0 && res.data) {
-        const d = res.data
-        form.value.name = d.name || ''
-        form.value.url = d.url || ''
-        form.value.group = d.group || ''
-        form.value.container = d.container || ''
-        form.value.item = d.item || ''
-        form.value.check_interval = d.check_interval || 3600
-        form.value.is_active = d.is_active ?? true
-        form.value.notify_filter = d.notify_filter || 'all'
-        form.value.notify_keywords = d.notify_keywords || ''
-        form.value.notify_account_ids = JSON.stringify(d.notify_account_ids || [])
-        if (d.fields && d.fields.length > 0) {
-          form.value.fields = d.fields.map(f => ({
-            name: f.name || '', selector: f.selector || '',
-            type: f.type || 'text', attr: f.attr || '', transform: f.transform || '',
-          }))
-        }
+        const loaded = fromMonitorResponse(res.data)
+        Object.assign(form, loaded)
+        originalFormSnapshot.value = JSON.parse(JSON.stringify(form))
+      } else {
+        submitError.value = res.message || '加载配置失败'
       }
     } catch (e) {
       submitError.value = '加载配置失败: ' + e.message
@@ -393,35 +253,52 @@ onMounted(async () => {
   }
 })
 
-function validate() {
-  if (!form.value.name.trim()) return '名称不能为空'
-  if (!form.value.url.trim()) return 'URL不能为空'
-  if (!form.value.container.trim()) return '容器选择器不能为空'
-  for (const f of form.value.fields) {
-    if (!f.name.trim()) return '字段名称不能为空'
+// Validate before submit
+async function runValidation() {
+  validationAttemptFingerprint.value = JSON.stringify(toMonitorRequest(form))
+  const localError = validateForm(form)
+  if (localError) {
+    validationResult.value = { valid: false, errors: [localError], summary: '请先修正表单配置后再验证。' }
+    submitError.value = localError
+    return false
   }
-  return null
+  validationLoading.value = true
+  submitError.value = null
+  try {
+    const payload = toMonitorRequest(form)
+    const res = await validateMonitorConfig(payload)
+    if (res.code === 0 && res.data) {
+      validationResult.value = res.data
+      validatedFingerprint.value = getDetectionFingerprint(form)
+      return true
+    }
+    const message = res.message || '验证失败'
+    validationResult.value = { valid: false, errors: [message], summary: '配置未通过验证。' }
+    return false
+  } catch (e) {
+    const message = e.response?.data?.message || e.message || '验证失败'
+    validationResult.value = { valid: false, errors: [message], summary: '配置未通过验证。' }
+    return false
+  } finally {
+    validationLoading.value = false
+  }
 }
 
 async function handleSubmit() {
-  const err = validate()
+  const err = validateForm(form)
   if (err) { submitError.value = err; return }
+  const semanticChange = !isEdit.value || !originalFormSnapshot.value || hasSemanticChange(originalFormSnapshot.value, form)
+  if (form.monitorType === 'field_transition' && semanticChange && validatedFingerprint.value !== getDetectionFingerprint(form)) {
+    const valid = await runValidation()
+    if (!valid) {
+      submitError.value = '价格监控必须先通过配置验证才能保存'
+      return
+    }
+  }
   submitError.value = null
   submitting.value = true
   try {
-    const payload = {
-      name: form.value.name.trim(), url: form.value.url.trim(),
-      container: form.value.container.trim(), item: form.value.item.trim(),
-      group: form.value.group.trim(), check_interval: form.value.check_interval || 3600,
-      is_active: form.value.is_active,
-      notify_filter: form.value.notify_filter,
-      notify_keywords: form.value.notify_filter === 'keyword' ? form.value.notify_keywords || '' : '',
-      notify_account_ids: form.value.notify_account_ids ? JSON.parse(form.value.notify_account_ids) : [],
-      fields: form.value.fields.filter(f => f.name.trim()).map(f => ({
-        ...f,
-        selector: (f.selector || '').trim(),
-      })),
-    }
+    const payload = toMonitorRequest(form)
     if (isEdit.value) {
       await updateMonitor(route.params.name, payload)
     } else {
@@ -435,93 +312,22 @@ async function handleSubmit() {
   }
 }
 
-// ===== 新增模式 =====
-const mode = ref('quick')
-const step = ref(1)
-const scanning = ref(false)
-const creating = ref(false)
-const scanError = ref('')
-const createError = ref('')
-const scanResult = ref({ containers: [] })
-const selectedContainer = ref(null)
-
-const selectedCandidate = computed(() => {
-  if (selectedContainer.value === null || !scanResult.value.containers[selectedContainer.value]) return null
-  return scanResult.value.containers[selectedContainer.value]
-})
-
-const quickForm = ref({ url: '', keywords: '', name: '' })
-
-const selectedContainerCss = computed(() => {
-  return selectedCandidate.value?.container_css || ''
-})
-
-const selectedContainerCount = computed(() => {
-  return selectedCandidate.value?.item_count || 0
-})
-
-async function handleScan() {
-  if (!quickForm.value.url.trim()) { scanError.value = '请输入 URL'; return }
-  if (!quickForm.value.keywords.trim()) { scanError.value = '请输入至少一个关键词'; return }
-  scanning.value = true
-  scanError.value = ''
-  selectedContainer.value = null
-  try {
-    const res = await previewScan({ url: quickForm.value.url.trim(), keywords: quickForm.value.keywords.trim() })
-    if (res.code === 0 && res.data) {
-      scanResult.value = res.data
-      if (res.data.containers && res.data.containers.length > 0) {
-        selectedContainer.value = 0
-        step.value = 2
-      } else {
-        scanError.value = '未找到匹配的内容。试试不同的关键词，或切换到高级模式。'
-      }
-    } else {
-      scanError.value = res.message || '扫描失败'
-    }
-  } catch (e) {
-    scanError.value = '扫描失败: ' + (e.response?.data?.message || e.message)
-  } finally {
-    scanning.value = false
-  }
-}
-
-async function handleCreate() {
-  if (!quickForm.value.name.trim()) { createError.value = '请输入监控器名称'; return }
-  creating.value = true
-  createError.value = ''
-  try {
-    const res = await smartCreate({
-      name: quickForm.value.name.trim(),
-      url: quickForm.value.url.trim(),
-      config: selectedCandidate.value?.config,
-      check_interval: 3600,
-      is_active: true,
-    })
-    if (res.code === 0) { router.push('/') }
-    else { createError.value = res.message || '创建失败' }
-  } catch (e) {
-    createError.value = '创建失败: ' + (e.response?.data?.message || e.message)
-  } finally {
-    creating.value = false
-  }
-}
-
 async function handleSaveAsRule() {
-  if (!selectedCandidate.value?.config) return
-  const cfg = selectedCandidate.value.config
-  const name = prompt('规则名称（如 澎湃快讯时间线）', quickForm.value.name.trim() + ' 规则')
+  if (!form.extraction.containerSelector) return
+  const name = prompt('规则名称（如 澎湃快讯时间线）', form.basic.name.trim() + ' 规则')
   if (!name) return
   try {
     await createScanRule({
       name,
-      url_contains: new URL(quickForm.value.url).hostname,
-      container: cfg.container,
-      item: cfg.item,
+      url_contains: new URL(form.basic.url).hostname,
+      container: form.extraction.containerSelector,
+      item: form.extraction.itemSelector,
       priority: 50,
       enabled: true,
-      description: '从扫描结果保存',
-      fields: (cfg.fields || []).map(f => ({ name: f.name, selector: f.selector, type: f.type, attr: f.attr || '', transform: f.transform || '' })),
+      description: '从表单保存',
+      fields: form.extraction.fields.filter(f => f.name).map(f => ({
+        name: f.name, selector: f.selector, type: f.type, attr: f.attr || '', transform: f.transform || '',
+      })),
     })
     showSuccess('规则已保存')
   } catch (e) {
@@ -534,71 +340,6 @@ async function handleSaveAsRule() {
 .page-header { margin-bottom: 1.5rem; }
 .page-header h1 { font-size: 1.5rem; font-weight: 700; color: var(--text); margin-top: 0.5rem; }
 
-.section-header { display: flex; justify-content: space-between; align-items: center; }
-.section-actions { flex-shrink: 0; }
-
-/* Mode tabs */
-.mode-tabs {
-  display: flex; gap: 0.25rem; background: var(--bg-surface);
-  border-radius: var(--radius-pill); padding: 3px; margin-bottom: 1.5rem; width: fit-content;
-}
-.mode-tab {
-  display: inline-flex; align-items: center; gap: 0.4rem;
-  padding: 0.5rem 1.25rem; border: none; border-radius: var(--radius-pill);
-  background: transparent; color: var(--text-secondary);
-  font-size: 0.8125rem; font-weight: 700; cursor: pointer; transition: var(--transition);
-}
-.mode-tab:hover { color: var(--text); }
-.mode-tab.active { background: var(--green); color: #000000; }
-
-/* Preview */
-.preview-panel { background: var(--bg-base); border-radius: var(--radius-lg); padding: 1rem; margin-bottom: 1rem; }
-.preview-input-row { display: flex; gap: 0.5rem; }
-.preview-input-row .form-input { flex: 1; }
-.preview-results { display: flex; flex-direction: column; gap: 0.5rem; }
-.preview-card { background: var(--bg-surface); border-radius: var(--radius-lg); padding: 0.75rem; }
-.preview-card-header { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; }
-.preview-samples { display: flex; flex-direction: column; gap: 0.2rem; }
-.preview-samples .sample-item {
-  display: flex; padding: 0.2rem 0.5rem; border-radius: 4px; background: var(--bg-elevated); font-size: 0.8125rem;
-}
-
-/* Step */
-.step-indicator { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1.5rem; }
-.step-dot { width: 28px; height: 28px; border-radius: var(--radius-circle); display: flex; align-items: center; justify-content: center; font-size: 0.75rem; font-weight: 700; background: var(--bg-elevated); color: var(--text-muted); flex-shrink: 0; }
-.step-dot.done { background: var(--green); color: #000000; }
-.step-dot.active { background: var(--bg-elevated); color: var(--text); box-shadow: 0 0 0 2px var(--green); }
-.step-line { flex: 1; height: 2px; background: var(--bg-hover); max-width: 60px; }
-
-/* Candidate cards */
-.candidate-card { background: var(--bg-card); border-radius: var(--radius-lg); padding: 1rem; margin-bottom: 0.75rem; cursor: pointer; transition: var(--transition); border: 2px solid transparent; }
-.candidate-card:hover { background: var(--bg-hover); }
-.candidate-card.selected { border-color: var(--green); background: rgba(30, 215, 96, 0.05); }
-.candidate-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; }
-.candidate-info { display: flex; align-items: center; gap: 0.5rem; }
-.candidate-badge { font-size: 0.6875rem; font-weight: 700; color: var(--text); background: var(--bg-elevated); padding: 0.15rem 0.5rem; border-radius: var(--radius-pill); }
-.candidate-count { font-size: 0.75rem; color: var(--text-secondary); }
-.candidate-hit { font-size: 0.75rem; color: var(--green); }
-.candidate-check { color: var(--green); }
-.candidate-selector { margin-bottom: 0.75rem; }
-.candidate-selector code { font-size: 0.75rem; color: var(--text-muted); background: var(--bg-elevated); padding: 0.15rem 0.4rem; border-radius: 4px; }
-.sample-list { display: flex; flex-direction: column; gap: 0.25rem; }
-.sample-item { display: flex; justify-content: space-between; padding: 0.3rem 0.5rem; border-radius: 4px; background: var(--bg-base); font-size: 0.8125rem; }
-.sample-title { color: var(--text); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sample-meta { color: var(--text-muted); font-size: 0.75rem; margin-left: 0.5rem; flex-shrink: 0; }
-.sample-more { font-size: 0.75rem; color: var(--text-muted); text-align: center; padding: 0.3rem; }
-
-/* Summary */
-.summary-card { background: var(--bg-surface); border-radius: var(--radius-lg); padding: 1rem; margin-bottom: 1rem; }
-.summary-row { display: flex; align-items: center; padding: 0.5rem 0; border-bottom: 1px solid var(--border-light); gap: 1rem; }
-.summary-row:last-child { border-bottom: none; }
-.summary-label { font-size: 0.75rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.8px; min-width: 60px; flex-shrink: 0; }
-.summary-value { font-size: 0.875rem; color: var(--text); word-break: break-all; }
-.summary-code { font-size: 0.75rem; color: var(--green); background: var(--bg-elevated); padding: 0.15rem 0.4rem; border-radius: 4px; }
-
-.hint { font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem; }
-
-/* 统一返回按钮 */
 .back-btn {
   display: inline-flex; align-items: center; gap: 0.3rem;
   padding: 0.35rem 0.85rem; border-radius: var(--radius-pill);
@@ -608,17 +349,35 @@ async function handleSaveAsRule() {
 }
 .back-btn:hover { background: var(--bg-hover); color: var(--text); }
 
-.filter-mode-row {
-  display: flex; gap: 0.5rem; margin-top: 0.25rem;
+.preview-panel {
+  background: var(--bg-surface);
+  border-radius: var(--radius-lg);
+  padding: 1rem;
+  margin-bottom: 1rem;
 }
-.radio-label {
-  display: flex; align-items: center; gap: 0.4rem;
-  padding: 0.45rem 0.85rem; border-radius: var(--radius-pill);
-  font-size: 0.8125rem; font-weight: 700; cursor: pointer;
-  background: var(--bg-surface); color: var(--text-secondary);
-  transition: var(--transition);
+.section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--border-light);
 }
-.radio-label:hover { background: var(--bg-elevated); color: var(--text); }
-.radio-label.active { background: var(--green); color: #000; }
-.radio-label input { display: none; }
+.section-header h2 { font-size: 0.9375rem; font-weight: 700; color: var(--text); }
+.preview-input-row { display: flex; gap: 0.5rem; }
+.preview-input-row .form-input { flex: 1; }
+.preview-results { display: flex; flex-direction: column; gap: 0.5rem; }
+.preview-card { background: var(--bg-card); border-radius: var(--radius-lg); padding: 0.75rem; }
+.preview-card { border: 1px solid transparent; cursor: pointer; transition: var(--transition); }
+.preview-card:hover, .preview-card.selected { border-color: var(--green); }
+.preview-card-header { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; }
+.apply-candidate { margin-left: auto; }
+.candidate-selectors { font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.5rem; word-break: break-all; }
+.candidate-selectors code { color: var(--green); }
+.candidate-badge { font-size: 0.6875rem; font-weight: 700; color: var(--text); background: var(--bg-elevated); padding: 0.15rem 0.5rem; border-radius: var(--radius-pill); }
+.candidate-count { font-size: 0.75rem; color: var(--text-secondary); }
+.preview-samples { display: flex; flex-direction: column; gap: 0.2rem; }
+.preview-samples .sample-item {
+  display: flex; padding: 0.2rem 0.5rem; border-radius: 4px; background: var(--bg-elevated); font-size: 0.8125rem;
+}
 </style>

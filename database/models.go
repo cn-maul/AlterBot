@@ -26,6 +26,19 @@ type Site struct {
 	// NotifyAccountIDs 启用的推送账户 ID 列表（JSON 数组，如 "[1,3,5]"）
 	NotifyAccountIDs string `gorm:"size:500"`
 	Fields           []SiteField
+
+	// StrategyType 监控策略: presence（新增检测）, field_transition（字段变化）
+	StrategyType string `gorm:"size:50;default:presence;index"`
+	// StrategyConfig JSON 策略配置
+	StrategyConfig string `gorm:"type:text"`
+	// FetchConfig JSON 抓取配置
+	FetchConfig string `gorm:"type:text"`
+	// BaselineStatus 基线状态: pending, ready, needs_baseline
+	BaselineStatus string `gorm:"size:20;default:pending"`
+	// ConfigVersion 配置版本号，修改选择器/字段时递增
+	ConfigVersion int `gorm:"default:1"`
+	// DataType 字段数据类型映射（JSON），如 {"price":"money","title":"text"}
+	FieldDataTypes string `gorm:"type:text"`
 }
 
 // SiteField 提取字段配置
@@ -101,6 +114,71 @@ func (UpdateRecord) TableName() string        { return "update_records" }
 func (NotificationAccount) TableName() string { return "notification_accounts" }
 func (ScanRuleTemplate) TableName() string    { return "scan_rule_templates" }
 func (ScanRuleField) TableName() string       { return "scan_rule_fields" }
+
+// MonitorSnapshot 当前观测状态快照
+type MonitorSnapshot struct {
+	ID                uint      `gorm:"primarykey" json:"id"`
+	CreatedAt         time.Time `gorm:"index" json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
+	SiteID            uint      `gorm:"uniqueIndex:idx_site_item;index" json:"site_id"`
+	ItemKey           string    `gorm:"uniqueIndex:idx_site_item;size:512" json:"item_key"`
+	PayloadJSON       string    `gorm:"type:text" json:"payload_json"`
+	NumericValuesJSON string    `gorm:"type:text" json:"numeric_values_json"`
+	Fingerprint       string    `gorm:"size:64;index" json:"fingerprint"`
+	DefinitionVersion int       `gorm:"default:1" json:"definition_version"`
+	FirstSeenAt       time.Time `json:"first_seen_at"`
+	LastSeenAt        time.Time `gorm:"index" json:"last_seen_at"`
+	MissingChecks     int       `gorm:"default:0" json:"missing_checks"`
+	Currency          string    `gorm:"size:10" json:"currency"`
+	PriceMinor        int64     `gorm:"default:0" json:"price_minor"`
+	PriceValid        bool      `gorm:"default:false" json:"price_valid"`
+}
+
+func (MonitorSnapshot) TableName() string { return "monitor_snapshots" }
+
+// MonitorEvent 不可变历史事件
+type MonitorEvent struct {
+	ID                uint      `gorm:"primarykey" json:"id"`
+	CreatedAt         time.Time `gorm:"index" json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
+	SiteID            uint      `gorm:"uniqueIndex:idx_site_dedupe;index" json:"site_id"`
+	EventType         string    `gorm:"size:50;index" json:"event_type"`
+	ItemKey           string    `gorm:"size:512;index" json:"item_key"`
+	Title             string    `gorm:"size:500" json:"title"`
+	URL               string    `gorm:"size:512" json:"url"`
+	BeforeJSON        string    `gorm:"type:text" json:"-"`
+	AfterJSON         string    `gorm:"type:text" json:"-"`
+	OldValue          string    `gorm:"size:500" json:"old_value"`
+	NewValue          string    `gorm:"size:500" json:"new_value"`
+	ChangeAmount      int64     `gorm:"default:0" json:"change_amount"`
+	ChangePercent     float64   `gorm:"default:0" json:"change_percent"`
+	Currency          string    `gorm:"size:10" json:"currency"`
+	DedupeKey         string    `gorm:"uniqueIndex:idx_site_dedupe;size:64" json:"-"`
+	DefinitionVersion int       `gorm:"default:1" json:"definition_version"`
+	OccurredAt        time.Time `gorm:"index" json:"occurred_at"`
+	Notified          bool      `gorm:"default:false;index" json:"notified"`
+	DeliveryStatus    string    `gorm:"size:20;default:pending;index" json:"delivery_status"`
+}
+
+func (MonitorEvent) TableName() string { return "monitor_events" }
+
+// NotificationDelivery 投递任务
+type NotificationDelivery struct {
+	ID            uint       `gorm:"primarykey" json:"id"`
+	CreatedAt     time.Time  `gorm:"index" json:"created_at"`
+	UpdatedAt     time.Time  `json:"updated_at"`
+	EventID       uint       `gorm:"uniqueIndex:idx_event_account;index" json:"event_id"`
+	AccountID     uint       `gorm:"uniqueIndex:idx_event_account;index" json:"account_id"`
+	SiteID        uint       `gorm:"index" json:"site_id"`
+	Status        string     `gorm:"size:20;default:pending;index" json:"status"`
+	Attempts      int        `gorm:"default:0" json:"attempts"`
+	NextAttemptAt *time.Time `gorm:"index" json:"next_attempt_at"`
+	LeaseUntil    *time.Time `gorm:"index" json:"lease_until"`
+	LastError     string     `gorm:"size:500" json:"last_error"`
+	SentAt        *time.Time `json:"sent_at"`
+}
+
+func (NotificationDelivery) TableName() string { return "notification_deliveries" }
 
 // SystemSetting 系统设置键值对
 type SystemSetting struct {

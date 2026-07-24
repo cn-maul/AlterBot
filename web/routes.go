@@ -44,6 +44,13 @@ func (s *WebServer) setupRoutes() {
 		api.PUT("/:name/mark-all-notified", s.markAllNotified)
 		api.POST("/:name/mark-read", s.markRead)
 		api.PUT("/:name/notify-accounts", s.updateNotifyAccounts)
+
+		// 新引擎 API
+		api.GET("/:name/events", s.getMonitorEvents)
+		api.GET("/:name/snapshots", s.getMonitorSnapshots)
+		api.POST("/:name/baseline", s.resetBaseline)
+		api.POST("/:name/check", s.manualCheck)
+		api.POST("/validate", s.validateMonitorConfig)
 	}
 
 	// 智能扫描（在 api 组之外，避免 :name 通配符冲突）

@@ -22,7 +22,15 @@ func New(opts ...Option) *Fetcher {
 
 // Fetch 执行HTTP请求
 func (f *Fetcher) Fetch(url string) (string, error) {
-	req, err := http.NewRequestWithContext(context.Background(), "GET", url, nil)
+	return f.FetchContext(context.Background(), url)
+}
+
+// FetchContext 执行支持取消和超时传递的 HTTP 请求。
+func (f *Fetcher) FetchContext(ctx context.Context, url string) (string, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return "", fmt.Errorf("创建请求失败: %w", err)
 	}

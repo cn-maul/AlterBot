@@ -48,7 +48,11 @@ func (e *Extractor) Extract(html string) ([]ExtractResult, error) {
 
 	var results []ExtractResult
 
-	doc.Find(e.containerSelector).Find(e.itemSelector).Each(func(_ int, s *goquery.Selection) {
+	items := doc.Find(e.containerSelector)
+	if strings.TrimSpace(e.itemSelector) != "" {
+		items = items.Find(e.itemSelector)
+	}
+	items.Each(func(_ int, s *goquery.Selection) {
 		result := make(ExtractResult)
 		for _, field := range e.fields {
 			if value := e.extractField(s, field); value != nil {

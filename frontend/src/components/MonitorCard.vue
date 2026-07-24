@@ -3,6 +3,9 @@
     <div class="card-left">
       <StatusBadge :status="statusText" />
       <span class="card-name">{{ monitor.name }}</span>
+      <span class="type-tag" v-if="monitor.strategy_type" :class="'tag-' + monitor.strategy_type">
+        {{ monitor.strategy_type === 'field_transition' ? '价格监控' : '新增检测' }}
+      </span>
     </div>
 
     <div class="card-url-wrap">
@@ -10,6 +13,9 @@
     </div>
 
     <div class="card-meta">
+      <span class="meta-baseline" v-if="monitor.strategy_type === 'field_transition' && monitor.baseline_status" :class="monitor.baseline_status === 'ready' ? 'baseline-ok' : 'baseline-pending'">
+        {{ monitor.baseline_status === 'ready' ? '基线就绪' : '待建立' }}
+      </span>
       <span class="meta-time" v-if="monitor.last_check">
         {{ formatTime(monitor.last_check) }}
       </span>
@@ -105,6 +111,29 @@ function formatTime(t) {
   flex-shrink: 0;
 }
 
+.type-tag {
+  font-size: 0.5625rem;
+  font-weight: 700;
+  padding: 0.08rem 0.35rem;
+  border-radius: var(--radius-pill);
+  flex-shrink: 0;
+}
+
+.tag-presence {
+  background: var(--success-bg);
+  color: var(--green);
+}
+
+.tag-field_transition {
+  background: #e3f2fd;
+  color: #1976d2;
+}
+
+.dark .tag-field_transition {
+  background: #0d2137;
+  color: #64b5f6;
+}
+
 .card-name {
   font-weight: 700;
   font-size: 0.875rem;
@@ -139,6 +168,24 @@ function formatTime(t) {
   font-size: 0.75rem;
   color: var(--text-muted);
   white-space: nowrap;
+}
+
+.meta-baseline {
+  font-size: 0.625rem;
+  font-weight: 700;
+  padding: 0.08rem 0.35rem;
+  border-radius: var(--radius-pill);
+  white-space: nowrap;
+}
+
+.baseline-ok {
+  background: var(--success-bg);
+  color: var(--green);
+}
+
+.baseline-pending {
+  background: var(--bg-elevated);
+  color: var(--text-muted);
 }
 
 .meta-updates {

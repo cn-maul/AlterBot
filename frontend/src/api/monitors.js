@@ -178,3 +178,30 @@ export function deleteScanRule(id) {
 export function testScanRule(id, data) {
   return rootClient.post(`/settings/scan-rules/${id}/test`, data).then(r => r.data)
 }
+
+// ===== 新引擎 API =====
+
+// 获取事件历史
+export function fetchEvents(name, params = {}) {
+  return client.get(`/monitors/${encodeURIComponent(name)}/events`, { params }).then(r => r.data)
+}
+
+// 获取当前快照
+export function fetchSnapshots(name) {
+  return client.get(`/monitors/${encodeURIComponent(name)}/snapshots`).then(r => r.data)
+}
+
+// 重置基线
+export function resetBaseline(name) {
+  return client.post(`/monitors/${encodeURIComponent(name)}/baseline`).then(r => r.data)
+}
+
+// 手动触发检查
+export function manualCheck(name) {
+  return client.post(`/monitors/${encodeURIComponent(name)}/check`).then(r => r.data)
+}
+
+// 验证监控配置
+export function validateMonitorConfig(config) {
+  return client.post('/monitors/validate', config).then(r => r.data)
+}

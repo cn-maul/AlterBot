@@ -1,6 +1,7 @@
 package monitor
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -15,13 +16,27 @@ import (
 )
 
 type Monitor struct {
-	site       *database.Site
-	extractor  *Extractor
-	fetcher    *fetcher.Fetcher
-	stopCh     chan struct{}
-	stopOnce   sync.Once
-	status     MonitorStatus
-	statusLock sync.RWMutex
+	site        *database.Site
+	siteLock    sync.RWMutex
+	extractor   *Extractor
+	fetcher     *fetcher.Fetcher
+	stopCh      chan struct{}
+	stopOnce    sync.Once
+	checkGate   chan struct{}
+	cancelLock  sync.Mutex
+	checkCancel context.CancelFunc
+	runLock     sync.Mutex
+	runStarted  bool
+	runDone     chan struct{}
+	status      MonitorStatus
+	statusLock  sync.RWMutex
+}
+
+type CheckOutcome struct {
+	StrategyType    string          `json:"strategy_type"`
+	Events          []ChangeEvent   `json:"events,omitempty"`
+	Updates         []ExtractResult `json:"updates,omitempty"`
+	IsFirstBaseline bool            `json:"is_first_baseline"`
 }
 
 func newMonitor(site *database.Site, fetcherOpts ...fetcher.Option) *Monitor {
@@ -48,15 +63,20 @@ func newMonitor(site *database.Site, fetcherOpts ...fetcher.Option) *Monitor {
 		extractor: NewExtractor(selectors),
 		fetcher:   f,
 		stopCh:    make(chan struct{}),
+		checkGate: make(chan struct{}, 1),
+		runDone:   make(chan struct{}),
 		status: MonitorStatus{
-			Name:          site.Name,
-			URL:           site.URL,
-			Group:         site.GroupName,
-			IsRunning:     true,
-			CheckInterval: site.GetCheckInterval(),
-			NextCheck:     time.Now().Add(site.GetCheckInterval()),
+			Name:           site.Name,
+			URL:            site.URL,
+			Group:          site.GroupName,
+			IsRunning:      true,
+			CheckInterval:  site.GetCheckInterval(),
+			NextCheck:      time.Now().Add(site.GetCheckInterval()),
+			StrategyType:   site.StrategyType,
+			BaselineStatus: site.BaselineStatus,
 		},
 	}
+	m.checkGate <- struct{}{}
 
 	return m
 }
@@ -74,7 +94,22 @@ func Start(site *database.Site) {
 
 // Run 运行监控循环。调用方必须先通过 NewMonitor 注册实例。
 func (m *Monitor) Run() {
-	site := m.site
+	m.runLock.Lock()
+	if m.runStarted {
+		m.runLock.Unlock()
+		return
+	}
+	m.runStarted = true
+	m.runLock.Unlock()
+	defer close(m.runDone)
+	select {
+	case <-m.stopCh:
+		m.updateStatus(func(s *MonitorStatus) { s.IsRunning = false })
+		return
+	default:
+	}
+
+	site := m.siteSnapshot()
 	ticker := time.NewTicker(site.GetCheckInterval())
 	defer ticker.Stop()
 
@@ -103,7 +138,7 @@ func (m *Monitor) Run() {
 func performCheck(m *Monitor, isFirst bool) {
 	defer func() {
 		if r := recover(); r != nil {
-			log.Printf("[%s] 检查异常: %v", m.site.Name, r)
+			log.Printf("[%s] 检查异常: %v", m.siteName(), r)
 			m.updateStatus(func(s *MonitorStatus) {
 				s.LastError = fmt.Sprintf("panic: %v", r)
 			})
@@ -111,22 +146,96 @@ func performCheck(m *Monitor, isFirst bool) {
 	}()
 
 	startTime := time.Now()
-	updates, err := m.CheckForUpdates()
+	outcome, err := m.CheckNow(context.Background())
 	duration := time.Since(startTime)
+	if outcome.StrategyType == "field_transition" {
+		logCheckResultFromEngine(m, outcome.Events, err, duration, isFirst)
+		if err == nil && len(outcome.Events) > 0 {
+			log.Printf("[%s] 产生 %d 个事件，等待投递队列处理", m.siteName(), len(outcome.Events))
+		}
+		return
+	}
+	logCheckResult(m, outcome.Updates, err, duration, isFirst)
+}
 
-	updateMonitorStatus(m, updates, err, duration)
-	logCheckResult(m, updates, err, duration, isFirst)
+// CheckNow 串行执行一次检查；定时检查和手动检查必须复用此入口。
+func (m *Monitor) CheckNow(ctx context.Context) (CheckOutcome, error) {
+	checkCtx, release, err := m.acquireCheck(ctx)
+	if err != nil {
+		return CheckOutcome{}, err
+	}
+	defer release()
 
-	if len(updates) > 0 {
+	startTime := time.Now()
+	site := m.siteSnapshot()
+	strategyType := site.StrategyType
+	if strategyType == "" {
+		strategyType = "presence"
+	}
+	outcome := CheckOutcome{StrategyType: strategyType}
+
+	if strategyType == "field_transition" {
+		engine, createErr := NewEngine(&site)
+		if createErr != nil {
+			updateMonitorStatusFromEngine(m, nil, createErr, time.Since(startTime))
+			return outcome, fmt.Errorf("创建引擎失败: %w", createErr)
+		}
+		events, isFirstBaseline, checkErr := engine.CheckOnce(checkCtx)
+		outcome.Events = events
+		outcome.IsFirstBaseline = isFirstBaseline
+		updateMonitorStatusFromEngine(m, events, checkErr, time.Since(startTime))
+		if isFirstBaseline && checkErr == nil {
+			m.SetBaselineStatus("ready")
+		}
+		return outcome, checkErr
+	}
+
+	updates, checkErr := m.checkForUpdatesContext(checkCtx, site)
+	outcome.Updates = updates
+	if checkErr == nil && site.BaselineStatus != "ready" {
+		if err := database.GetDB().Model(&database.Site{}).Where("id = ?", site.ID).Update("baseline_status", "ready").Error; err != nil {
+			checkErr = fmt.Errorf("更新基线状态失败: %w", err)
+		} else {
+			outcome.IsFirstBaseline = true
+			m.SetBaselineStatus("ready")
+		}
+	}
+	updateMonitorStatus(m, updates, checkErr, time.Since(startTime))
+	if checkErr == nil && len(updates) > 0 {
 		m.sendCombinedNotification(updates)
 	}
+	return outcome, checkErr
+}
+
+func (m *Monitor) acquireCheck(ctx context.Context) (context.Context, func(), error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	select {
+	case <-ctx.Done():
+		return nil, nil, ctx.Err()
+	case <-m.checkGate:
+	}
+	checkCtx, cancel := context.WithCancel(ctx)
+	m.cancelLock.Lock()
+	m.checkCancel = cancel
+	m.cancelLock.Unlock()
+	release := func() {
+		cancel()
+		m.cancelLock.Lock()
+		m.checkCancel = nil
+		m.cancelLock.Unlock()
+		m.checkGate <- struct{}{}
+	}
+	return checkCtx, release, nil
 }
 
 func updateMonitorStatus(m *Monitor, updates []ExtractResult, err error, duration time.Duration) {
+	site := m.siteSnapshot()
 	m.updateStatus(func(s *MonitorStatus) {
 		s.LastCheck = time.Now()
 		s.LastDuration = duration
-		s.NextCheck = time.Now().Add(m.site.GetCheckInterval())
+		s.NextCheck = time.Now().Add(site.GetCheckInterval())
 
 		if err != nil {
 			s.LastError = err.Error()
@@ -140,8 +249,31 @@ func updateMonitorStatus(m *Monitor, updates []ExtractResult, err error, duratio
 	})
 
 	// 同步更新数据库中的 last_check_at
-	if err := database.GetDB().Model(m.site).Update("LastCheckAt", time.Now()).Error; err != nil {
-		log.Printf("[%s] 更新 LastCheckAt 失败: %v", m.site.Name, err)
+	if err := database.GetDB().Model(&database.Site{}).Where("id = ?", site.ID).Update("LastCheckAt", time.Now()).Error; err != nil {
+		log.Printf("[%s] 更新 LastCheckAt 失败: %v", site.Name, err)
+	}
+}
+
+func updateMonitorStatusFromEngine(m *Monitor, events []ChangeEvent, err error, duration time.Duration) {
+	site := m.siteSnapshot()
+	m.updateStatus(func(s *MonitorStatus) {
+		s.LastCheck = time.Now()
+		s.LastDuration = duration
+		s.NextCheck = time.Now().Add(site.GetCheckInterval())
+
+		if err != nil {
+			s.LastError = err.Error()
+		} else {
+			s.LastError = ""
+			if len(events) > 0 {
+				s.LastUpdate = time.Now()
+				s.UpdatesCount += len(events)
+			}
+		}
+	})
+
+	if err := database.GetDB().Model(&database.Site{}).Where("id = ?", site.ID).Update("LastCheckAt", time.Now()).Error; err != nil {
+		log.Printf("[%s] 更新 LastCheckAt 失败: %v", site.Name, err)
 	}
 }
 
@@ -151,7 +283,7 @@ func logCheckResult(m *Monitor, updates []ExtractResult, err error, duration tim
 		prefix = "首次检查"
 	}
 
-	name := m.site.Name
+	name := m.siteName()
 	if err != nil {
 		log.Printf("[%s] %s失败 (耗时: %v): %v", name, prefix, duration, err)
 		return
@@ -167,8 +299,34 @@ func logCheckResult(m *Monitor, updates []ExtractResult, err error, duration tim
 	}
 }
 
+func logCheckResultFromEngine(m *Monitor, events []ChangeEvent, err error, duration time.Duration, isFirst bool) {
+	prefix := "检查"
+	if isFirst {
+		prefix = "首次检查"
+	}
+
+	name := m.siteName()
+	if err != nil {
+		log.Printf("[%s] %s失败 (耗时: %v): %v", name, prefix, duration, err)
+		return
+	}
+
+	if len(events) > 0 {
+		log.Printf("[%s] %s发现 %d 个事件 (耗时: %v)", name, prefix, len(events), duration)
+		for _, event := range events {
+			log.Printf(" - [%s] %s: %s", event.EventType, event.Title, event.NewValue)
+		}
+	} else {
+		log.Printf("[%s] %s未发现变化 (耗时: %v)", name, prefix, duration)
+	}
+}
+
 func (m *Monitor) CheckForUpdates() ([]ExtractResult, error) {
-	html, err := m.fetcher.Fetch(m.site.URL)
+	return m.checkForUpdatesContext(context.Background(), m.siteSnapshot())
+}
+
+func (m *Monitor) checkForUpdatesContext(ctx context.Context, site database.Site) ([]ExtractResult, error) {
+	html, err := m.fetcher.FetchContext(ctx, site.URL)
 	if err != nil {
 		return nil, fmt.Errorf("fetch failed: %w", err)
 	}
@@ -177,7 +335,7 @@ func (m *Monitor) CheckForUpdates() ([]ExtractResult, error) {
 	if err != nil {
 		return nil, fmt.Errorf("extraction failed: %w", err)
 	}
-	if err := ResolveExtractedURLs(m.site.URL, current); err != nil {
+	if err := ResolveExtractedURLs(site.URL, current); err != nil {
 		return nil, fmt.Errorf("resolve extracted URLs failed: %w", err)
 	}
 
@@ -238,11 +396,83 @@ func (m *Monitor) Stop() {
 	m.stopOnce.Do(func() {
 		close(m.stopCh)
 	})
+	m.cancelLock.Lock()
+	if m.checkCancel != nil {
+		m.checkCancel()
+	}
+	m.cancelLock.Unlock()
+	m.updateStatus(func(s *MonitorStatus) { s.IsRunning = false })
+}
+
+// StopAndWait 停止监控循环，并等待已经开始的循环退出。
+func (m *Monitor) StopAndWait(ctx context.Context) error {
+	m.Stop()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	m.runLock.Lock()
+	started := m.runStarted
+	m.runLock.Unlock()
+	if !started {
+		return nil
+	}
+	select {
+	case <-m.runDone:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // UpdateSiteNotifyAccounts 更新运行中监控器的推送账户（无需重启）
 func (m *Monitor) UpdateSiteNotifyAccounts(ids string) {
+	m.siteLock.Lock()
+	defer m.siteLock.Unlock()
 	m.site.NotifyAccountIDs = ids
+}
+
+// SetBaselineStatus 同步更新数据库和内存中的基线状态
+func (m *Monitor) SetBaselineStatus(status string) {
+	m.siteLock.Lock()
+	m.site.BaselineStatus = status
+	m.siteLock.Unlock()
+	m.updateStatus(func(s *MonitorStatus) {
+		s.BaselineStatus = status
+	})
+}
+
+// ResetBaseline 与检查互斥地重置数据库和内存基线状态。
+func (m *Monitor) ResetBaseline(ctx context.Context) error {
+	_, release, err := m.acquireCheck(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+	site := m.siteSnapshot()
+	newVersion, err := database.ResetMonitorBaseline(site.ID)
+	if err != nil {
+		return err
+	}
+	m.siteLock.Lock()
+	m.site.ConfigVersion = newVersion
+	m.site.BaselineStatus = "needs_baseline"
+	m.siteLock.Unlock()
+	m.updateStatus(func(s *MonitorStatus) { s.BaselineStatus = "needs_baseline" })
+	return nil
+}
+
+func (m *Monitor) siteSnapshot() database.Site {
+	m.siteLock.RLock()
+	defer m.siteLock.RUnlock()
+	copySite := *m.site
+	copySite.Fields = append([]database.SiteField(nil), m.site.Fields...)
+	return copySite
+}
+
+func (m *Monitor) siteName() string {
+	m.siteLock.RLock()
+	defer m.siteLock.RUnlock()
+	return m.site.Name
 }
 
 func (m *Monitor) loadLastResults() ([]ExtractResult, error) {
@@ -351,22 +581,23 @@ func compareResults(last, current []ExtractResult) []ExtractResult {
 	return newItems
 }
 
-// matchKeywords 检查更新项的标题是否命中任一关键词（大小写不敏感）
+// matchKeywords 检查更新项的标题或URL是否命中任一关键词（大小写不敏感）
 func matchKeywords(item ExtractResult, keywordList []string) bool {
 	if len(keywordList) == 0 {
 		return true
 	}
 	title, _ := item["title"].(string)
-	if title == "" {
+	urlStr, _ := item["url"].(string)
+	text := strings.ToLower(title + " " + urlStr)
+	if text == "" {
 		return false
 	}
-	titleLower := strings.ToLower(title)
 	for _, kw := range keywordList {
 		kw = strings.TrimSpace(kw)
 		if kw == "" {
 			continue
 		}
-		if strings.Contains(titleLower, strings.ToLower(kw)) {
+		if strings.Contains(text, strings.ToLower(kw)) {
 			return true
 		}
 	}
@@ -388,9 +619,9 @@ func filterByKeywords(items []ExtractResult, keywords string) []ExtractResult {
 	return matched
 }
 
-func (m *Monitor) buildNotifyContent(items []ExtractResult) (string, string) {
+func buildNotifyContent(siteName string, items []ExtractResult) (string, string) {
 	// 推送给前端但前端不需要 content，保持原有格式
-	title := fmt.Sprintf("%s 有 %d 条更新", m.site.Name, len(items))
+	title := fmt.Sprintf("%s 有 %d 条更新", siteName, len(items))
 	var content strings.Builder
 	content.WriteString("最新更新内容：\n")
 	for i, item := range items {
@@ -400,41 +631,42 @@ func (m *Monitor) buildNotifyContent(items []ExtractResult) (string, string) {
 }
 
 func (m *Monitor) sendCombinedNotification(items []ExtractResult) {
+	site := m.siteSnapshot()
 	if !notify.IsEnabled() {
-		log.Printf("[%s] 推送已关闭，跳过 %d 条通知", m.site.Name, len(items))
+		log.Printf("[%s] 推送已关闭，跳过 %d 条通知", site.Name, len(items))
 		return
 	}
 
 	// 如果启用了关键词过滤，只推送命中关键词的更新
-	if m.site.NotifyFilter == "keyword" && m.site.NotifyKeywords != "" {
-		matched := filterByKeywords(items, m.site.NotifyKeywords)
+	if site.NotifyFilter == "keyword" && site.NotifyKeywords != "" {
+		matched := filterByKeywords(items, site.NotifyKeywords)
 		if len(matched) == 0 {
-			log.Printf("[%s] 关键词过滤后无匹配项，跳过推送", m.site.Name)
+			log.Printf("[%s] 关键词过滤后无匹配项，跳过推送", site.Name)
 			return
 		}
 		items = matched
 	}
 
 	// 确定要推送的账户
-	accountIDs := m.site.GetNotifyAccountIDs()
+	accountIDs := site.GetNotifyAccountIDs()
 	if len(accountIDs) == 0 {
-		log.Printf("[%s] 未配置推送账户，跳过推送", m.site.Name)
+		log.Printf("[%s] 未配置推送账户，跳过推送", site.Name)
 		return
 	}
 
-	title, content := m.buildNotifyContent(items)
+	title, content := buildNotifyContent(site.Name, items)
 
 	var sentCount int
 	var failedAccounts []string
 	for _, accID := range accountIDs {
 		var account database.NotificationAccount
 		if err := database.GetDB().First(&account, accID).Error; err != nil {
-			log.Printf("[%s] 推送账户 #%d 不存在，跳过", m.site.Name, accID)
+			log.Printf("[%s] 推送账户 #%d 不存在，跳过", site.Name, accID)
 			failedAccounts = append(failedAccounts, fmt.Sprintf("#%d", accID))
 			continue
 		}
 		if err := notify.SendToAccount(&account, title, content); err != nil {
-			log.Printf("[%s] 推送账户「%s」(%s) 发送失败: %v", m.site.Name, account.Name, account.Service, err)
+			log.Printf("[%s] 推送账户「%s」(%s) 发送失败: %v", site.Name, account.Name, account.Service, err)
 			failedAccounts = append(failedAccounts, account.Name)
 			continue
 		}
@@ -443,19 +675,19 @@ func (m *Monitor) sendCombinedNotification(items []ExtractResult) {
 
 	// 全部失败时不标记
 	if sentCount == 0 {
-		log.Printf("[%s] 所有推送账户均发送失败", m.site.Name)
+		log.Printf("[%s] 所有推送账户均发送失败", site.Name)
 		return
 	}
 
 	// 部分失败时仅记录，不标记 notified，以便用户在 UI 中看到未推送状态
 	if len(failedAccounts) > 0 {
 		log.Printf("[%s] 部分推送账户失败 (%d/%d 成功): %s",
-			m.site.Name, sentCount, len(accountIDs), strings.Join(failedAccounts, ", "))
+			site.Name, sentCount, len(accountIDs), strings.Join(failedAccounts, ", "))
 	}
 
 	// 全部成功才标记已通知，避免部分账户失败时丢失推送
 	if sentCount < len(accountIDs) {
-		log.Printf("[%s] 存在失败账户，不标记 notified，等待下次重试", m.site.Name)
+		log.Printf("[%s] 存在失败账户，不标记 notified，等待下次重试", site.Name)
 		return
 	}
 
@@ -465,15 +697,15 @@ func (m *Monitor) sendCombinedNotification(items []ExtractResult) {
 		itemTitle := toString(item["title"])
 		urlStr := toString(item["url"])
 		if err := database.GetDB().Model(&database.UpdateRecord{}).
-			Where("site_id = ? AND title = ? AND url = ? AND notified = ?", m.site.ID, itemTitle, urlStr, false).
+			Where("site_id = ? AND title = ? AND url = ? AND notified = ?", site.ID, itemTitle, urlStr, false).
 			Updates(map[string]interface{}{
 				"notified":    true,
 				"notified_at": now,
 			}).Error; err != nil {
-			log.Printf("[%s] 标记通知记录失败 (title=%s, url=%s): %v", m.site.Name, itemTitle, urlStr, err)
+			log.Printf("[%s] 标记通知记录失败 (title=%s, url=%s): %v", site.Name, itemTitle, urlStr, err)
 		}
 	}
-	log.Printf("[%s] 推送成功至 %d 个账户，已标记 %d 条记录", m.site.Name, sentCount, len(items))
+	log.Printf("[%s] 推送成功至 %d 个账户，已标记 %d 条记录", site.Name, sentCount, len(items))
 }
 
 func extractKey(item ExtractResult) string {

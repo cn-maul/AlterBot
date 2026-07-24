@@ -1,10 +1,13 @@
 package web
 
 import (
+	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -16,21 +19,25 @@ import (
 	"github.com/cn-maul/Gentry/monitor"
 	"github.com/cn-maul/Gentry/notify"
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 // addMonitorRequest 创建监控器的请求体
 type addMonitorRequest struct {
-	Name             string          `json:"name" binding:"required"`
-	URL              string          `json:"url" binding:"required"`
-	Container        string          `json:"container" binding:"required"`
-	Item             string          `json:"item"`
-	Group            string          `json:"group"`
-	CheckInterval    int             `json:"check_interval"`
-	IsActive         bool            `json:"is_active"`
-	NotifyFilter     string          `json:"notify_filter"`
-	NotifyKeywords   string          `json:"notify_keywords"`
-	NotifyAccountIDs json.RawMessage `json:"notify_account_ids"`
-	Fields           []fieldRequest  `json:"fields"`
+	Name             string            `json:"name" binding:"required"`
+	URL              string            `json:"url" binding:"required"`
+	Container        string            `json:"container" binding:"required"`
+	Item             string            `json:"item"`
+	Group            string            `json:"group"`
+	CheckInterval    int               `json:"check_interval"`
+	IsActive         bool              `json:"is_active"`
+	NotifyFilter     string            `json:"notify_filter"`
+	NotifyKeywords   string            `json:"notify_keywords"`
+	NotifyAccountIDs json.RawMessage   `json:"notify_account_ids"`
+	Fields           []fieldRequest    `json:"fields"`
+	StrategyType     string            `json:"strategy_type"`
+	StrategyConfig   json.RawMessage   `json:"strategy_config"`
+	FieldDataTypes   map[string]string `json:"field_data_types"`
 }
 
 type fieldRequest struct {
@@ -42,18 +49,27 @@ type fieldRequest struct {
 }
 
 type monitorConfigResponse struct {
-	ID               uint           `json:"id"`
-	Name             string         `json:"name"`
-	URL              string         `json:"url"`
-	Container        string         `json:"container"`
-	Item             string         `json:"item"`
-	Group            string         `json:"group"`
-	CheckInterval    int            `json:"check_interval"`
-	IsActive         bool           `json:"is_active"`
-	NotifyFilter     string         `json:"notify_filter"`
-	NotifyKeywords   string         `json:"notify_keywords"`
-	NotifyAccountIDs []uint         `json:"notify_account_ids"`
-	Fields           []fieldRequest `json:"fields"`
+	ID               uint              `json:"id"`
+	Name             string            `json:"name"`
+	URL              string            `json:"url"`
+	Container        string            `json:"container"`
+	Item             string            `json:"item"`
+	Group            string            `json:"group"`
+	CheckInterval    int               `json:"check_interval"`
+	IsActive         bool              `json:"is_active"`
+	NotifyFilter     string            `json:"notify_filter"`
+	NotifyKeywords   string            `json:"notify_keywords"`
+	NotifyAccountIDs []uint            `json:"notify_account_ids"`
+	Fields           []fieldRequest    `json:"fields"`
+	StrategyType     string            `json:"strategy_type,omitempty"`
+	StrategyConfig   json.RawMessage   `json:"strategy_config,omitempty"`
+	FieldDataTypes   map[string]string `json:"field_data_types,omitempty"`
+	BaselineStatus   string            `json:"baseline_status,omitempty"`
+}
+
+type monitorSnapshotResponse struct {
+	database.MonitorSnapshot
+	PriceDisplay string `json:"price_display"`
 }
 
 func monitorConfigFromSite(site *database.Site) monitorConfigResponse {
@@ -66,6 +82,14 @@ func monitorConfigFromSite(site *database.Site) monitorConfigResponse {
 			Attr:      f.Attr,
 			Transform: f.Transform,
 		})
+	}
+	var strategyConfig json.RawMessage
+	if site.StrategyConfig != "" {
+		strategyConfig = json.RawMessage(site.StrategyConfig)
+	}
+	var fieldDataTypes map[string]string
+	if site.FieldDataTypes != "" {
+		json.Unmarshal([]byte(site.FieldDataTypes), &fieldDataTypes)
 	}
 	return monitorConfigResponse{
 		ID:               site.ID,
@@ -80,6 +104,10 @@ func monitorConfigFromSite(site *database.Site) monitorConfigResponse {
 		NotifyKeywords:   site.NotifyKeywords,
 		NotifyAccountIDs: site.GetNotifyAccountIDs(),
 		Fields:           fields,
+		StrategyType:     site.StrategyType,
+		StrategyConfig:   strategyConfig,
+		FieldDataTypes:   fieldDataTypes,
+		BaselineStatus:   site.BaselineStatus,
 	}
 }
 
@@ -89,10 +117,7 @@ func normalizeNotifyAccountIDs(raw json.RawMessage) (string, error) {
 	}
 	var ids []uint
 	if err := json.Unmarshal(raw, &ids); err == nil {
-		if len(ids) == 0 {
-			return "", nil
-		}
-		data, err := json.Marshal(ids)
+		data, err := json.Marshal(uniqueAccountIDs(ids))
 		if err != nil {
 			return "", err
 		}
@@ -108,11 +133,28 @@ func normalizeNotifyAccountIDs(raw json.RawMessage) (string, error) {
 	if err := json.Unmarshal([]byte(legacy), &ids); err != nil {
 		return "", fmt.Errorf("notify_account_ids contains invalid JSON array: %w", err)
 	}
-	data, err := json.Marshal(ids)
+	data, err := json.Marshal(uniqueAccountIDs(ids))
 	if err != nil {
 		return "", err
 	}
 	return string(data), nil
+}
+
+func uniqueAccountIDs(ids []uint) []uint {
+	seen := make(map[uint]struct{}, len(ids))
+	result := make([]uint, 0, len(ids))
+	for _, id := range ids {
+		if id == 0 {
+			continue
+		}
+		if _, exists := seen[id]; exists {
+			continue
+		}
+		seen[id] = struct{}{}
+		result = append(result, id)
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i] < result[j] })
+	return result
 }
 
 func applyNotifyAccountIDs(site *database.Site, raw json.RawMessage) error {
@@ -130,6 +172,19 @@ func dbSiteFromRequest(req *addMonitorRequest) (*database.Site, error) {
 	if group == "" {
 		group = "默认"
 	}
+	strategyType := req.StrategyType
+	if strategyType == "" {
+		strategyType = "presence"
+	}
+	var strategyConfigStr string
+	if len(req.StrategyConfig) > 0 {
+		strategyConfigStr = string(req.StrategyConfig)
+	}
+	var fieldDataTypesStr string
+	if len(req.FieldDataTypes) > 0 {
+		data, _ := json.Marshal(req.FieldDataTypes)
+		fieldDataTypesStr = string(data)
+	}
 	site := &database.Site{
 		Name:           req.Name,
 		URL:            req.URL,
@@ -140,6 +195,11 @@ func dbSiteFromRequest(req *addMonitorRequest) (*database.Site, error) {
 		IsActive:       req.IsActive,
 		NotifyFilter:   req.NotifyFilter,
 		NotifyKeywords: req.NotifyKeywords,
+		StrategyType:   strategyType,
+		StrategyConfig: strategyConfigStr,
+		FieldDataTypes: fieldDataTypesStr,
+		BaselineStatus: "pending",
+		ConfigVersion:  1,
 	}
 	if err := applyNotifyAccountIDs(site, req.NotifyAccountIDs); err != nil {
 		return nil, err
@@ -166,6 +226,20 @@ func siteFieldsFromRequest(fields []fieldRequest) []database.SiteField {
 	return result
 }
 
+func siteFieldsToRequest(fields []database.SiteField) []fieldRequest {
+	result := make([]fieldRequest, 0, len(fields))
+	for _, f := range fields {
+		result = append(result, fieldRequest{
+			Name:      f.Name,
+			Selector:  f.Selector,
+			Type:      f.Type,
+			Attr:      f.Attr,
+			Transform: f.Transform,
+		})
+	}
+	return result
+}
+
 func (s *WebServer) addMonitor(c *gin.Context) {
 	var req addMonitorRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -181,6 +255,10 @@ func (s *WebServer) addMonitor(c *gin.Context) {
 	site, err := dbSiteFromRequest(&req)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, NewErrorResponse(400, "invalid notify_account_ids: "+err.Error()))
+		return
+	}
+	if err := monitor.NormalizeAndValidateSiteDefinition(site); err != nil {
+		c.JSON(http.StatusBadRequest, NewErrorResponse(400, "invalid monitor config: "+err.Error()))
 		return
 	}
 
@@ -201,6 +279,8 @@ func (s *WebServer) addMonitor(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, NewErrorResponse(500, "创建并启动监控器失败: "+err.Error()))
 			return
 		}
+	} else {
+		monitor.RegisterStoppedSite(site)
 	}
 
 	log.Printf("[Web] 新增监控器: %s", site.Name)
@@ -215,7 +295,13 @@ func (s *WebServer) removeMonitor(c *gin.Context) {
 
 	// 如果正在运行则停止
 	if monitor.Exists(name) {
-		monitor.StopMonitor(name)
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), 15*time.Second)
+		err := monitor.QuiesceMonitor(name, stopCtx)
+		stopCancel()
+		if err != nil {
+			c.JSON(http.StatusConflict, NewErrorResponse(409, "monitor is busy: "+err.Error()))
+			return
+		}
 	}
 	// 从注册表移除
 	monitor.UnregisterMonitor(name)
@@ -287,37 +373,89 @@ func (s *WebServer) updateMonitor(c *gin.Context) {
 		return
 	}
 
-	// 从数据库查找
-	var site database.Site
-	if err := database.GetDB().Where("name = ?", oldName).First(&site).Error; err != nil {
+	// 从数据库查找（必须 Preload Fields）
+	var originalSite database.Site
+	if err := database.GetDB().Preload("Fields").Where("name = ?", oldName).First(&originalSite).Error; err != nil {
 		c.JSON(http.StatusNotFound, NewErrorResponse(404, "monitor not found"))
 		return
 	}
 
-	// 更新数据库（事务性地更新站点及字段）
+	// 计算旧指纹（在修改 site 之前）
+	originalSite.Fields = append([]database.SiteField(nil), originalSite.Fields...)
+	oldFields := siteFieldsToRequest(originalSite.Fields)
+	oldFingerprint := computeDetectionFingerprint(originalSite.URL, originalSite.Container, originalSite.Item, oldFields, originalSite.StrategyType, originalSite.StrategyConfig, originalSite.FieldDataTypes)
+
+	// 构建新配置
 	group := req.Group
 	if group == "" {
 		group = "默认"
 	}
-	site.Name = req.Name
-	site.URL = req.URL
-	site.Container = req.Container
-	site.Item = req.Item
-	site.GroupName = group
-	site.CheckInterval = req.CheckInterval
-	site.IsActive = req.IsActive
-	site.NotifyFilter = req.NotifyFilter
-	site.NotifyKeywords = req.NotifyKeywords
-	if err := applyNotifyAccountIDs(&site, req.NotifyAccountIDs); err != nil {
+	strategyType := req.StrategyType
+	if strategyType == "" {
+		strategyType = "presence"
+	}
+	var strategyConfigStr string
+	if len(req.StrategyConfig) > 0 {
+		strategyConfigStr = string(req.StrategyConfig)
+	}
+	var fieldDataTypesStr string
+	if len(req.FieldDataTypes) > 0 {
+		data, _ := json.Marshal(req.FieldDataTypes)
+		fieldDataTypesStr = string(data)
+	}
+
+	// 构建并校验候选定义
+	candidate := originalSite
+	candidate.Name = req.Name
+	candidate.URL = req.URL
+	candidate.Container = req.Container
+	candidate.Item = req.Item
+	candidate.GroupName = group
+	candidate.CheckInterval = req.CheckInterval
+	candidate.IsActive = req.IsActive
+	candidate.NotifyFilter = req.NotifyFilter
+	candidate.NotifyKeywords = req.NotifyKeywords
+	candidate.StrategyType = strategyType
+	candidate.StrategyConfig = strategyConfigStr
+	candidate.FieldDataTypes = fieldDataTypesStr
+	candidate.Fields = siteFieldsFromRequest(req.Fields)
+	if err := applyNotifyAccountIDs(&candidate, req.NotifyAccountIDs); err != nil {
 		c.JSON(http.StatusBadRequest, NewErrorResponse(400, "invalid notify_account_ids: "+err.Error()))
 		return
 	}
+	if err := monitor.NormalizeAndValidateSiteDefinition(&candidate); err != nil {
+		c.JSON(http.StatusBadRequest, NewErrorResponse(400, "invalid monitor config: "+err.Error()))
+		return
+	}
 
-	if err := database.UpdateSiteWithFields(&site, siteFieldsFromRequest(req.Fields)); err != nil {
+	newFingerprint := computeDetectionFingerprint(candidate.URL, candidate.Container, candidate.Item, siteFieldsToRequest(candidate.Fields), candidate.StrategyType, candidate.StrategyConfig, candidate.FieldDataTypes)
+	needsBaseline := oldFingerprint != newFingerprint
+	if needsBaseline {
+		candidate.ConfigVersion++
+		candidate.BaselineStatus = "needs_baseline"
+	}
+
+	// 先停止旧实例并等待在途检查退出，防止旧定义在事务后写回快照。
+	quiesceCtx, quiesceCancel := context.WithTimeout(context.Background(), 15*time.Second)
+	quiesceErr := monitor.QuiesceMonitor(oldName, quiesceCtx)
+	quiesceCancel()
+	if quiesceErr != nil {
+		if _, restoreErr := monitor.AtomicReplaceMonitor(&originalSite, oldName); restoreErr != nil {
+			log.Printf("[Web] 中止更新后恢复旧监控器「%s」失败: %v", oldName, restoreErr)
+		}
+		c.JSON(http.StatusConflict, NewErrorResponse(409, "monitor is busy: "+quiesceErr.Error()))
+		return
+	}
+
+	if err := database.UpdateMonitorDefinition(&candidate, candidate.Fields, needsBaseline); err != nil {
+		if _, restoreErr := monitor.AtomicReplaceMonitor(&originalSite, oldName); restoreErr != nil {
+			log.Printf("[Web] 恢复旧监控器「%s」失败: %v", oldName, restoreErr)
+		}
 		log.Printf("[Web] 更新监控器「%s」失败: %v", oldName, err)
 		c.JSON(http.StatusInternalServerError, NewErrorResponse(500, "update failed: "+err.Error()))
 		return
 	}
+	site := candidate
 
 	// 使用 AtomicReplaceMonitor 原子式处理内存 registry 更新
 	if req.IsActive {
@@ -536,21 +674,43 @@ func (s *WebServer) getStats(c *gin.Context) {
 	var totalMonitors int64
 	db.Model(&database.Site{}).Count(&totalMonitors)
 
-	runningMonitors := len(monitor.GetAllMonitors())
+	runningMonitors := 0
+	for _, status := range monitor.GetAllMonitors() {
+		if status.IsRunning {
+			runningMonitors++
+		}
+	}
 
-	var totalUpdates int64
-	db.Model(&database.UpdateRecord{}).Count(&totalUpdates)
+	legacyScope := func() *gorm.DB {
+		return db.Model(&database.UpdateRecord{}).
+			Joins("JOIN sites ON sites.id = update_records.site_id").
+			Where("COALESCE(sites.strategy_type, 'presence') <> ?", "field_transition")
+	}
+	var legacyTotal, eventTotal int64
+	legacyScope().Count(&legacyTotal)
+	db.Model(&database.MonitorEvent{}).Count(&eventTotal)
+	totalUpdates := legacyTotal + eventTotal
 
 	oneHourAgo := time.Now().Add(-1 * time.Hour)
-	var updatesLastHour int64
-	db.Model(&database.UpdateRecord{}).Where("created_at >= ?", oneHourAgo).Count(&updatesLastHour)
+	var legacyLastHour, eventsLastHour int64
+	legacyScope().Where("update_records.created_at >= ?", oneHourAgo).Count(&legacyLastHour)
+	db.Model(&database.MonitorEvent{}).Where("created_at >= ?", oneHourAgo).Count(&eventsLastHour)
+	updatesLastHour := legacyLastHour + eventsLastHour
 
-	var unnotifiedUpdates int64
-	db.Model(&database.UpdateRecord{}).Where("notified = ?", false).Count(&unnotifiedUpdates)
+	var legacyPending, eventPending int64
+	legacyScope().Where("update_records.notified = ?", false).Count(&legacyPending)
+	db.Model(&database.MonitorEvent{}).Where("delivery_status = ?", "pending").Count(&eventPending)
+	unnotifiedUpdates := legacyPending + eventPending
 
-	todayStart := time.Now().Truncate(24 * time.Hour)
-	var pushedToday int64
-	db.Model(&database.UpdateRecord{}).Where("notified = ? AND notified_at >= ?", true, todayStart).Count(&pushedToday)
+	now := time.Now()
+	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	var legacyPushedToday, eventPushedToday int64
+	legacyScope().Where("update_records.notified = ? AND update_records.notified_at >= ?", true, todayStart).Count(&legacyPushedToday)
+	db.Model(&database.NotificationDelivery{}).
+		Distinct("event_id").
+		Where("status = ? AND sent_at >= ?", "sent", todayStart).
+		Count(&eventPushedToday)
+	pushedToday := legacyPushedToday + eventPushedToday
 
 	var totalAccounts int64
 	db.Model(&database.NotificationAccount{}).Count(&totalAccounts)
@@ -1324,4 +1484,246 @@ func (s *WebServer) testScanRule(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, NewSuccessResponse(result))
+}
+
+// ===== 新引擎 API =====
+
+func (s *WebServer) getMonitorEvents(c *gin.Context) {
+	name := c.Param("name")
+	var site database.Site
+	if err := database.GetDB().Where("name = ?", name).First(&site).Error; err != nil {
+		c.JSON(http.StatusNotFound, NewErrorResponse(404, "monitor not found"))
+		return
+	}
+
+	page := 1
+	pageSize := 20
+	if rawPage := c.Query("page"); rawPage != "" {
+		parsed, err := strconv.Atoi(rawPage)
+		if err == nil && parsed > 0 {
+			page = parsed
+		}
+	}
+	if rawSize := c.Query("size"); rawSize != "" {
+		parsed, err := strconv.Atoi(rawSize)
+		if err == nil && parsed > 0 && parsed <= 100 {
+			pageSize = parsed
+		}
+	}
+
+	var total int64
+	database.GetDB().Model(&database.MonitorEvent{}).Where("site_id = ?", site.ID).Count(&total)
+
+	var events []database.MonitorEvent
+	if err := database.GetDB().Where("site_id = ?", site.ID).
+		Order("occurred_at desc").
+		Offset((page - 1) * pageSize).
+		Limit(pageSize).
+		Find(&events).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, NewErrorResponse(500, "failed to load events: "+err.Error()))
+		return
+	}
+
+	c.JSON(http.StatusOK, NewSuccessResponse(map[string]interface{}{
+		"total":  total,
+		"page":   page,
+		"size":   pageSize,
+		"events": events,
+	}))
+}
+
+func (s *WebServer) getMonitorSnapshots(c *gin.Context) {
+	name := c.Param("name")
+	var site database.Site
+	if err := database.GetDB().Where("name = ?", name).First(&site).Error; err != nil {
+		c.JSON(http.StatusNotFound, NewErrorResponse(404, "monitor not found"))
+		return
+	}
+
+	var snapshots []database.MonitorSnapshot
+	if err := database.GetDB().Where("site_id = ? AND definition_version = ?", site.ID, site.ConfigVersion).Order("last_seen_at desc").Find(&snapshots).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, NewErrorResponse(500, "failed to load snapshots: "+err.Error()))
+		return
+	}
+
+	result := make([]monitorSnapshotResponse, 0, len(snapshots))
+	for _, snapshot := range snapshots {
+		priceDisplay := ""
+		if snapshot.PriceValid {
+			priceDisplay = monitor.FormatPrice(snapshot.PriceMinor, snapshot.Currency)
+		}
+		result = append(result, monitorSnapshotResponse{MonitorSnapshot: snapshot, PriceDisplay: priceDisplay})
+	}
+	c.JSON(http.StatusOK, NewSuccessResponse(result))
+}
+
+func (s *WebServer) resetBaseline(c *gin.Context) {
+	name := c.Param("name")
+	var site database.Site
+	if err := database.GetDB().Where("name = ?", name).First(&site).Error; err != nil {
+		c.JSON(http.StatusNotFound, NewErrorResponse(404, "monitor not found"))
+		return
+	}
+
+	var err error
+	if runningMonitor := monitor.GetMonitor(name); runningMonitor != nil {
+		err = runningMonitor.ResetBaseline(c.Request.Context())
+	} else {
+		_, err = database.ResetMonitorBaseline(site.ID)
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, NewErrorResponse(500, "failed to reset baseline: "+err.Error()))
+		return
+	}
+
+	log.Printf("[Web] 重置基线: %s", name)
+	c.JSON(http.StatusOK, NewSuccessResponse(nil))
+}
+
+func (s *WebServer) manualCheck(c *gin.Context) {
+	name := c.Param("name")
+	var site database.Site
+	if err := database.GetDB().Preload("Fields").Where("name = ?", name).First(&site).Error; err != nil {
+		c.JSON(http.StatusNotFound, NewErrorResponse(404, "monitor not found"))
+		return
+	}
+
+	runningMonitor := monitor.GetMonitor(name)
+	if runningMonitor == nil {
+		runningMonitor = monitor.NewDetachedMonitor(&site)
+	}
+	outcome, err := runningMonitor.CheckNow(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, NewErrorResponse(500, "check failed: "+err.Error()))
+		return
+	}
+	count := len(outcome.Events)
+	if outcome.StrategyType == "presence" {
+		count = len(outcome.Updates)
+	}
+
+	c.JSON(http.StatusOK, NewSuccessResponse(map[string]interface{}{
+		"events":            outcome.Events,
+		"updates":           outcome.Updates,
+		"count":             count,
+		"is_first_baseline": outcome.IsFirstBaseline,
+	}))
+}
+
+func (s *WebServer) validateMonitorConfig(c *gin.Context) {
+	var req addMonitorRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, NewErrorResponse(400, "invalid request: "+err.Error()))
+		return
+	}
+
+	site, err := dbSiteFromRequest(&req)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, NewErrorResponse(400, "invalid monitor config: "+err.Error()))
+		return
+	}
+	if err := monitor.NormalizeAndValidateSiteDefinition(site); err != nil {
+		c.JSON(http.StatusBadRequest, NewErrorResponse(400, "invalid monitor config: "+err.Error()))
+		return
+	}
+	engine, err := monitor.NewEngine(site)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, NewErrorResponse(400, "invalid monitor config: "+err.Error()))
+		return
+	}
+	report, err := engine.ValidateExtraction(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusBadRequest, NewErrorResponse(400, "config validation failed: "+err.Error()))
+		return
+	}
+	label := "条目提取"
+	if site.StrategyType == "field_transition" {
+		label = "商品身份与价格解析"
+	}
+	c.JSON(http.StatusOK, NewSuccessResponse(map[string]interface{}{
+		"valid":           true,
+		"status":          "valid",
+		"extracted_items": report.ExtractedItems,
+		"items": []map[string]interface{}{
+			{
+				"status":  "ok",
+				"label":   label,
+				"detail":  fmt.Sprintf("成功提取并验证 %d 条记录", report.ExtractedItems),
+				"samples": report.Samples,
+			},
+		},
+		"errors":           []string{},
+		"summary":          fmt.Sprintf("配置有效，共提取 %d 条记录；本次验证未写入基线或发送通知。", report.ExtractedItems),
+		"strategy_config":  json.RawMessage(site.StrategyConfig),
+		"field_data_types": json.RawMessage(site.FieldDataTypes),
+	}))
+}
+
+// computeDetectionFingerprint 计算检测语义指纹，用于判断配置变化是否需要重建基线
+func computeDetectionFingerprint(url, container, item string, fields []fieldRequest, strategyType, strategyConfig, fieldDataTypes string) string {
+	type canonicalField struct {
+		Name      string `json:"name"`
+		Selector  string `json:"selector"`
+		Type      string `json:"type"`
+		Attr      string `json:"attr"`
+		Transform string `json:"transform"`
+	}
+	canonicalFields := make([]canonicalField, 0, len(fields))
+	for _, field := range fields {
+		fieldType := field.Type
+		if fieldType == "" {
+			fieldType = "text"
+		}
+		canonicalFields = append(canonicalFields, canonicalField{
+			Name: field.Name, Selector: field.Selector, Type: fieldType, Attr: field.Attr, Transform: field.Transform,
+		})
+	}
+	sort.Slice(canonicalFields, func(i, j int) bool {
+		left, _ := json.Marshal(canonicalFields[i])
+		right, _ := json.Marshal(canonicalFields[j])
+		return string(left) < string(right)
+	})
+
+	canonicalStrategy := canonicalJSONString(strategyConfig)
+	if rule, err := monitor.ParseDetectionRule(strategyConfig); err == nil {
+		if strategyType == "" {
+			strategyType = "presence"
+		}
+		if rule.Type == strategyType {
+			if data, marshalErr := json.Marshal(rule); marshalErr == nil {
+				canonicalStrategy = string(data)
+			}
+		}
+	}
+	definition := struct {
+		URL            string           `json:"url"`
+		Container      string           `json:"container"`
+		Item           string           `json:"item"`
+		StrategyType   string           `json:"strategy_type"`
+		StrategyConfig string           `json:"strategy_config"`
+		FieldDataTypes string           `json:"field_data_types"`
+		Fields         []canonicalField `json:"fields"`
+	}{
+		URL: strings.TrimSpace(url), Container: container, Item: item,
+		StrategyType: strategyType, StrategyConfig: canonicalStrategy,
+		FieldDataTypes: canonicalJSONString(fieldDataTypes), Fields: canonicalFields,
+	}
+	data, _ := json.Marshal(definition)
+	sum := sha256.Sum256(data)
+	return fmt.Sprintf("%x", sum[:])
+}
+
+func canonicalJSONString(raw string) string {
+	if strings.TrimSpace(raw) == "" {
+		return "{}"
+	}
+	var value interface{}
+	if err := json.Unmarshal([]byte(raw), &value); err != nil {
+		return strings.TrimSpace(raw)
+	}
+	data, err := json.Marshal(value)
+	if err != nil {
+		return strings.TrimSpace(raw)
+	}
+	return string(data)
 }

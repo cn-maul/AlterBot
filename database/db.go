@@ -22,9 +22,15 @@ func Init(dbPath string) error {
 	}
 
 	// 自动迁移 Schema
-	if err := DB.AutoMigrate(&Site{}, &SiteField{}, &UpdateRecord{}, &NotificationAccount{}, &ScanRuleTemplate{}, &ScanRuleField{}, &SystemSetting{}); err != nil {
+	if err := DB.AutoMigrate(&Site{}, &SiteField{}, &UpdateRecord{}, &NotificationAccount{}, &ScanRuleTemplate{}, &ScanRuleField{}, &SystemSetting{}, &MonitorSnapshot{}, &MonitorEvent{}, &NotificationDelivery{}); err != nil {
 		return err
 	}
+
+	// 为旧 site 记录设置默认策略类型
+	DB.Model(&Site{}).Where("strategy_type = ''").Update("strategy_type", "presence")
+	DB.Model(&Site{}).Where("baseline_status = ''").Update("baseline_status", "pending")
+	DB.Model(&Site{}).Where("config_version = 0").Update("config_version", 1)
+	DB.Model(&MonitorEvent{}).Where("delivery_status = ''").Update("delivery_status", "pending")
 
 	log.Printf("[DB] 数据库就绪: %s", dbPath)
 	return nil

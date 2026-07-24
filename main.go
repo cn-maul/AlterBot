@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"embed"
 	"io/fs"
 	"log"
@@ -9,6 +10,7 @@ import (
 	"os/signal"
 	"runtime"
 	"syscall"
+	"time"
 
 	"github.com/cn-maul/Gentry/database"
 	"github.com/cn-maul/Gentry/monitor"
@@ -52,7 +54,11 @@ func main() {
 		log.Println("[Web] 前端未构建，仅 API 模式运行（cd frontend && npm run dev）")
 	}
 
-	// 4. 启动 Web 服务
+	// 4. 启动投递服务
+	deliverySvc := monitor.NewDeliveryService()
+	deliverySvc.Start()
+
+	// 5. 启动 Web 服务
 	ws := web.NewWebServer(frontendFS)
 	go func() {
 		addr := ":" + getPort()
@@ -62,13 +68,18 @@ func main() {
 		}
 	}()
 
-	// 5. 等待中断信号
+	// 6. 等待中断信号
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	sig := <-sigCh
 	log.Printf("收到信号 %v，正在停止所有监控器...", sig)
 
 	monitor.StopAll()
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 15*time.Second)
+	if err := deliverySvc.Stop(shutdownCtx); err != nil {
+		log.Printf("停止投递服务超时: %v", err)
+	}
+	shutdownCancel()
 	log.Println("Gentry 已安全退出")
 }
 
