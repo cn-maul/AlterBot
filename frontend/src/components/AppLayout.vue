@@ -40,6 +40,7 @@
           <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
           <span>{{ isDark ? '亮色' : '暗色' }}</span>
         </button>
+        <UpdatePanel />
       </div>
     </aside>
 
@@ -120,6 +121,7 @@
 <script setup>
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { fetchStats } from '../api/monitors'
+import UpdatePanel from './UpdatePanel.vue'
 
 const STORAGE_KEY = 'gentry_theme'
 const isDark = ref(false)

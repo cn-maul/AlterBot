@@ -65,6 +65,9 @@ func (s *WebServer) setupRoutes() {
 
 	// 扫描规则模板 CRUD
 	authenticated.GET("/settings/scan-rules", s.listScanRules)
+	authenticated.GET("/settings/scan-rules/export", s.exportScanRules)
+	authenticated.POST("/settings/scan-rules/import", s.importScanRules)
+	authenticated.POST("/settings/scan-rules/quick", s.quickCreateScanRule)
 	authenticated.POST("/settings/scan-rules", s.createScanRule)
 	authenticated.PUT("/settings/scan-rules/:id", s.updateScanRule)
 	authenticated.DELETE("/settings/scan-rules/:id", s.deleteScanRule)
@@ -72,6 +75,11 @@ func (s *WebServer) setupRoutes() {
 
 	// 推送服务供应商元数据（供前端展示字段标签和校验）
 	authenticated.GET("/settings/notification-providers", s.listNotificationProviders)
+
+	// 更新接口（无需认证，用于版本检查）
+	s.engine.GET("/api/version", s.getVersion)
+	s.engine.GET("/api/update/check", s.checkUpdate)
+	authenticated.POST("/api/update/apply", s.applyUpdate)
 
 	if s.frontendFS != nil {
 		assets, err := fs.Sub(s.frontendFS, "assets")

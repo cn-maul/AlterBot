@@ -21,6 +21,9 @@ import (
 //go:embed frontend/dist
 var frontendDist embed.FS
 
+// Version 程序版本号，发布新版本时手动修改
+const Version = "v1.1.1"
+
 func main() {
 	setupConsoleEncoding()
 	log.SetFlags(log.Ldate | log.Ltime | log.Lshortfile)
@@ -59,7 +62,7 @@ func main() {
 	deliverySvc.Start()
 
 	// 5. 启动 Web 服务
-	ws := web.NewWebServer(frontendFS)
+	ws := web.NewWebServer(frontendFS, Version)
 	go func() {
 		addr := ":" + getPort()
 		log.Printf("[Web] 服务启动: http://localhost%s", addr)

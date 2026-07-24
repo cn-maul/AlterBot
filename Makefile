@@ -29,6 +29,6 @@ release:
 
 # 清理构建产物
 clean:
-	rm -f gentry gentry-linux-amd64 gentry-windows-amd64.exe
+	rm -f gentry gentry-linux-amd64 gentry-windows-amd64.exe gentry.bak
 	rm -rf frontend/dist
 	rm -f gentry.db

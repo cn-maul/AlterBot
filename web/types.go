@@ -10,6 +10,7 @@ import (
 type WebServer struct {
 	engine     *gin.Engine
 	frontendFS fs.FS
+	version    string
 }
 
 // APIResponse 标准API响应格式
@@ -20,6 +21,6 @@ type APIResponse struct {
 }
 
 // NewWebServer 创建WebServer实例
-func NewWebServer(frontendFS fs.FS) *WebServer {
-	return &WebServer{engine: gin.Default(), frontendFS: frontendFS}
+func NewWebServer(frontendFS fs.FS, version string) *WebServer {
+	return &WebServer{engine: gin.Default(), frontendFS: frontendFS, version: version}
 }

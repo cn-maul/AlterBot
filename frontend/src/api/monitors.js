@@ -164,6 +164,20 @@ export function createScanRule(data) {
   return rootClient.post('/settings/scan-rules', data).then(r => r.data)
 }
 
+// 从预扫描候选快速创建规则
+export function quickCreateScanRule(data) {
+  return rootClient.post('/settings/scan-rules/quick', data).then(r => r.data)
+}
+
+// 导出/导入规则库
+export function exportScanRules() {
+  return rootClient.get('/settings/scan-rules/export').then(r => r.data)
+}
+
+export function importScanRules(data) {
+  return rootClient.post('/settings/scan-rules/import', data).then(r => r.data)
+}
+
 // 更新扫描规则模板
 export function updateScanRule(id, data) {
   return rootClient.put(`/settings/scan-rules/${id}`, data).then(r => r.data)
@@ -204,4 +218,18 @@ export function manualCheck(name) {
 // 验证监控配置
 export function validateMonitorConfig(config) {
   return client.post('/monitors/validate', config).then(r => r.data)
+}
+
+// ===== 更新接口 =====
+
+export function fetchVersion() {
+  return rootClient.get('/version').then(r => r.data)
+}
+
+export function checkUpdate() {
+  return rootClient.get('/update/check').then(r => r.data)
+}
+
+export function applyUpdate(downloadURL) {
+  return rootClient.post('/update/apply', { download_url: downloadURL }).then(r => r.data)
 }
