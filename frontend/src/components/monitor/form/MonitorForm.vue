@@ -7,7 +7,7 @@
     <ExtractionEditor
       v-model="form.extraction"
       :url="form.basic.url"
-      @preview="$emit('preview')"
+      :monitorType="form.monitorType"
     />
 
     <template v-if="form.monitorType === 'presence'">
@@ -79,7 +79,7 @@ const props = defineProps({
   showBaselineWarning: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['update:form', 'preview', 'validate'])
+const emit = defineEmits(['update:form', 'validate'])
 
 function updateForm(newForm) {
   emit('update:form', newForm)

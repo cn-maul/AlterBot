@@ -7,54 +7,6 @@
       </div>
     </div>
 
-    <!-- ===== Preview Panel ===== -->
-    <div class="preview-panel" v-if="showPreview">
-      <div class="section-header">
-        <h2>预览抓取结果</h2>
-        <button class="btn btn-sm btn-ghost" @click="showPreview = false">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-          关闭
-        </button>
-      </div>
-      <div class="form-group">
-        <label>关键词（辅助验证，多个用逗号隔开）</label>
-        <div class="preview-input-row">
-          <input v-model="previewKeyword" class="form-input" placeholder="公告" @keyup.enter="runPreview" />
-          <button class="btn btn-sm btn-primary" :disabled="previewLoading" @click="runPreview">{{ previewLoading ? '扫描中' : '扫描' }}</button>
-        </div>
-      </div>
-      <div class="loading" v-if="previewLoading"><div class="spinner" /><p>扫描中...</p></div>
-      <div class="preview-results" v-else-if="previewData && previewData.containers && previewData.containers.length > 0">
-        <div
-          v-for="(c, ci) in previewData.containers"
-          :key="ci"
-          class="preview-card"
-          :class="{ selected: selectedPreviewIndex === ci }"
-          @click="selectedPreviewIndex = ci"
-        >
-          <div class="preview-card-header">
-            <span class="candidate-badge">{{ c.container_tag.toUpperCase() }}</span>
-            <span class="candidate-count">{{ c.item_count }} 条</span>
-            <button class="btn btn-sm btn-primary apply-candidate" type="button" @click.stop="applyPreviewCandidate(c)">应用此配置</button>
-          </div>
-          <div class="candidate-selectors">
-            <code>{{ c.config?.container || c.container_css }}</code>
-            <span> / </span>
-            <code>{{ c.config?.item || c.item_css || '单项' }}</code>
-          </div>
-          <div class="preview-samples">
-            <div v-for="(item, ii) in c.sample_items" :key="ii" class="sample-item">
-              <span class="sample-title">{{ item.title }}</span>
-            </div>
-          </div>
-        </div>
-      </div>
-      <div class="empty" v-else-if="previewScanned">
-        <p>未找到匹配内容，试试不同关键词或调整选择器</p>
-      </div>
-      <div class="form-error" v-if="previewError">{{ previewError }}</div>
-    </div>
-
     <!-- ===== Loading ===== -->
     <div class="loading" v-if="isEdit && loading">
       <div class="spinner" />
@@ -71,7 +23,6 @@
         :validationResult="validationResult"
         :validationLoading="validationLoading"
         :showBaselineWarning="baselineWarning"
-        @preview="openPreview"
         @validate="runValidation"
         @update:form="onFormUpdate"
       >
@@ -89,7 +40,7 @@
 <script setup>
 import { ref, computed, reactive, onMounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { createMonitor, updateMonitor, fetchMonitorConfig, fetchAccounts, previewScan, createScanRule, validateMonitorConfig } from '../api/monitors'
+import { createMonitor, updateMonitor, fetchMonitorConfig, fetchAccounts, createScanRule, validateMonitorConfig } from '../api/monitors'
 import MonitorForm from '../components/monitor/form/MonitorForm.vue'
 import { createEmptyForm, toMonitorRequest, fromMonitorResponse, hasSemanticChange, validateForm, getDetectionFingerprint } from '../composables/useMonitorForm'
 import { useToastMessages } from '../composables/useToastMessages'
@@ -108,15 +59,6 @@ const originalFormSnapshot = ref(null)
 
 const accounts = ref([])
 
-// Preview
-const showPreview = ref(false)
-const previewKeyword = ref('')
-const previewLoading = ref(false)
-const previewData = ref(null)
-const previewScanned = ref(false)
-const previewError = ref(null)
-const selectedPreviewIndex = ref(null)
-
 // Validation
 const validationResult = ref(null)
 const validationLoading = ref(false)
@@ -125,69 +67,6 @@ const validationAttemptFingerprint = ref('')
 
 // Baseline warning
 const baselineWarning = ref(false)
-
-function openPreview() {
-  showPreview.value = true
-}
-
-async function runPreview() {
-  if (!form.basic.url.trim()) return
-  previewLoading.value = true
-  previewScanned.value = false
-  previewError.value = null
-  selectedPreviewIndex.value = null
-  try {
-    const res = await previewScan({
-      url: form.basic.url.trim(),
-      keywords: previewKeyword.value || (form.monitorType === 'field_transition' ? '价格,售价,优惠' : '公告'),
-    })
-    if (res.code === 0 && res.data) {
-      previewData.value = res.data
-    }
-  } catch (e) {
-    previewError.value = e.response?.data?.message || e.message || '扫描失败'
-  }
-  previewScanned.value = true
-  previewLoading.value = false
-}
-
-function normalizeScanFields(fields) {
-  return (fields || []).map(field => ({
-    name: field.name || '',
-    selector: field.selector || '',
-    type: field.type || 'text',
-    attr: field.attr || '',
-    transform: field.transform || '',
-  }))
-}
-
-function ensurePriceField() {
-  if (form.monitorType !== 'field_transition') return
-  const currentTarget = form.rule.target.field || 'price'
-  if (!form.extraction.fields.some(field => field.name === currentTarget)) {
-    form.extraction.fields.push({ name: currentTarget, selector: '.price', type: 'text', attr: '', transform: '' })
-  }
-  form.rule.target.field = currentTarget
-  form.rule.target.valueType = 'money'
-  if (!['decreased', 'at_or_below'].includes(form.rule.transition.operator)) {
-    form.rule.transition.operator = 'decreased'
-  }
-}
-
-function applyPreviewCandidate(candidate) {
-  const config = candidate.config || {}
-  const fields = normalizeScanFields(config.fields)
-  form.extraction.containerSelector = config.container || candidate.container_css || ''
-  form.extraction.itemSelector = config.item || candidate.item_css || ''
-  if (fields.length > 0) form.extraction.fields = fields
-  if (form.monitorType === 'field_transition') {
-    form.rule.pageMode = form.extraction.itemSelector ? 'list' : 'single'
-    if (form.rule.pageMode === 'list') form.rule.identity.mode = 'field'
-    ensurePriceField()
-  }
-  showPreview.value = false
-  showSuccess('已应用扫描候选配置，可继续调整字段和规则')
-}
 
 function onFormUpdate(newForm) {
   Object.assign(form, newForm)
@@ -203,6 +82,19 @@ watch(() => form.monitorType, (monitorType) => {
     ensurePriceField()
   }
 })
+
+function ensurePriceField() {
+  if (form.monitorType !== 'field_transition') return
+  const currentTarget = form.rule.target.field || 'price'
+  if (!form.extraction.fields.some(field => field.name === currentTarget)) {
+    form.extraction.fields.push({ name: currentTarget, selector: '.price', type: 'text', attr: '', transform: '' })
+  }
+  form.rule.target.field = currentTarget
+  form.rule.target.valueType = 'money'
+  if (!['decreased', 'at_or_below'].includes(form.rule.transition.operator)) {
+    form.rule.transition.operator = 'decreased'
+  }
+}
 
 watch(
   () => getDetectionFingerprint(form),
@@ -348,36 +240,4 @@ async function handleSaveAsRule() {
   transition: var(--transition); margin-bottom: 0.5rem;
 }
 .back-btn:hover { background: var(--bg-hover); color: var(--text); }
-
-.preview-panel {
-  background: var(--bg-surface);
-  border-radius: var(--radius-lg);
-  padding: 1rem;
-  margin-bottom: 1rem;
-}
-.section-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 0.75rem;
-  padding-bottom: 0.5rem;
-  border-bottom: 1px solid var(--border-light);
-}
-.section-header h2 { font-size: 0.9375rem; font-weight: 700; color: var(--text); }
-.preview-input-row { display: flex; gap: 0.5rem; }
-.preview-input-row .form-input { flex: 1; }
-.preview-results { display: flex; flex-direction: column; gap: 0.5rem; }
-.preview-card { background: var(--bg-card); border-radius: var(--radius-lg); padding: 0.75rem; }
-.preview-card { border: 1px solid transparent; cursor: pointer; transition: var(--transition); }
-.preview-card:hover, .preview-card.selected { border-color: var(--green); }
-.preview-card-header { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; }
-.apply-candidate { margin-left: auto; }
-.candidate-selectors { font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.5rem; word-break: break-all; }
-.candidate-selectors code { color: var(--green); }
-.candidate-badge { font-size: 0.6875rem; font-weight: 700; color: var(--text); background: var(--bg-elevated); padding: 0.15rem 0.5rem; border-radius: var(--radius-pill); }
-.candidate-count { font-size: 0.75rem; color: var(--text-secondary); }
-.preview-samples { display: flex; flex-direction: column; gap: 0.2rem; }
-.preview-samples .sample-item {
-  display: flex; padding: 0.2rem 0.5rem; border-radius: 4px; background: var(--bg-elevated); font-size: 0.8125rem;
-}
 </style>
